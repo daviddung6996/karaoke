@@ -1,282 +1,389 @@
-import { useState, useCallback, useEffect } from 'react';
-import { useQueue } from './hooks/useQueue';
-import { useHistory } from './hooks/useHistory';
-import { useTTS } from './hooks/useTTS';
-import { useYouTube } from './hooks/useYouTube';
-import { searchYouTube } from './services/youtube';
-import { setApiKey, getApiKey } from './services/ai';
-import Preview from './components/Preview';
-import NowPlaying from './components/NowPlaying';
-import Queue from './components/Queue';
-import SearchBar from './components/SearchBar';
-import SingerInput from './components/SingerInput';
-import HotSongs from './components/HotSongs';
+import React from 'react';
+import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 
-export default function App() {
-    const { queue, currentSong, nextSong, waitingQueue, addSong, removeSong, moveUp, moveDown, advanceQueue, clearAll, queueLength } = useQueue();
-    const { addToHistory, getHotSongs } = useHistory();
-    const { announceSinger, callSinger } = useTTS();
-    const youtube = useYouTube();
+import QueueList from './modules/queue/QueueList';
+import SearchBar from './modules/search/SearchBar';
+import Button from './modules/ui/Button';
+import Card from './modules/ui/Card';
+import { usePlayerSync } from './modules/player/usePlayerSync';
+import ValidationView from './modules/projection/ValidationView';
+import YouTubePlayer from './modules/player/YouTubePlayer';
+import WaitingOverlay from './modules/player/WaitingOverlay';
+import PlayerControls from './modules/player/PlayerControls';
 
-    const [singerModal, setSingerModal] = useState(null);
-    const [showHotSongs, setShowHotSongs] = useState(false);
-    const [toast, setToast] = useState(null);
-    const [undoItem, setUndoItem] = useState(null);
-    const [apiKeyInput, setApiKeyInput] = useState('');
-    const [showSettings, setShowSettings] = useState(false);
+import { Search, Play, Pause, SkipForward, RotateCcw, Square } from 'lucide-react';
+import { useAppStore } from './modules/core/store';
+import { useTTS } from './modules/core/useTTS';
+import { useMicDetection } from './modules/core/useMicDetection';
+import { cleanYoutubeTitle } from './utils/titleUtils';
+import { useTVWindow } from './modules/core/useTVWindow';
 
-    useEffect(() => {
-        if (!getApiKey()) {
-            setShowSettings(true);
-        }
-    }, []);
+const ControlPanel = () => {
+  // Sync state to TV window via BroadcastChannel
+  usePlayerSync('host');
+  const [activePanel, setActivePanel] = React.useState('center'); // 'left', 'center', 'right'
 
-    const showToast = useCallback((message) => {
-        setToast(message);
-        setTimeout(() => setToast(null), 2500);
-    }, []);
+  const { isPlaying, setIsPlaying, triggerRestart, queue, removeFromQueue, setCurrentSong, currentSong, queueMode, toggleQueueMode, invitedSongId, setInvitedSongId, setWaitingForGuest, waitCountdown, setWaitCountdown } = useAppStore();
+  const { announce } = useTTS();
+  const { waitForPresence, cancelDetection } = useMicDetection();
+  const { isTVOpen, openTV, closeTV } = useTVWindow();
+  const micAbortRef = React.useRef(null);
+  const skipWaitRef = React.useRef(false);
 
-    const handleSelectSong = useCallback((song) => {
-        setSingerModal(song);
-    }, []);
 
-    async function playSong(song) {
-        // If we already have a videoId (from YouTube search results), use it directly
-        if (song.videoId) {
-            console.log('[App] Using pre-resolved video:', song.videoId, 'fallbacks:', song.fallbackIds?.length || 0);
-            youtube.loadVideo(song.videoId, song.fallbackIds || []);
-            showToast(`▶ Đang phát: ${song.title}`);
-            return;
-        }
 
-        showToast(`🔍 Đang tìm bài ${song.title}...`);
-        const videoId = await searchYouTube(song.title, song.artist);
-        if (videoId) {
-            console.log('[App] Found video:', videoId);
-            youtube.loadVideo(videoId);
-            showToast(`▶ Đang phát: ${song.title}`);
-        } else {
-            console.warn('[App] No video found for:', song.title);
-            showToast(`❌ Không tìm thấy video. Thử "THÊM BÀI THỦ CÔNG".`);
-        }
+
+  const handlePlayPause = () => {
+    // If no song is loaded but queue has songs, pull the first one
+    if (!currentSong && queue.length > 0) {
+      const nextSong = queue[0];
+      setCurrentSong(nextSong);
+      removeFromQueue(nextSong.id);
+      // setIsPlaying(true) will be triggered by the doAnnounceAndPlay effect
+      return;
+    }
+    setIsPlaying(!isPlaying);
+  };
+
+  const handleManualStart = () => {
+    skipWaitRef.current = true;
+    if (micAbortRef.current) micAbortRef.current.abort();
+  };
+
+  const handleNext = () => {
+    if (queue.length > 0) {
+      const nextSong = queue[0];
+      setCurrentSong(nextSong);
+      removeFromQueue(nextSong.id);
+    } else {
+      // Optional: clear current song if queue empty? 
+      // For now, let's just stop playing or keep last song. 
+      // User might want to replay. 
+      // Let's just stop.
+      setIsPlaying(false);
+    }
+  };
+
+  const handleSongEnd = () => {
+    console.log("Song ended. Auto-playing next...");
+    // Queue empty — just stop. TV window stays open for reuse.
+    handleNext();
+  };
+
+  // Auto-announce when song changes
+  const [announcedSongId, setAnnouncedSongId] = React.useState(null);
+
+  const performAnnouncement = React.useCallback(async (song) => {
+    const singer = song.addedBy || 'quý khách';
+    let songName = song.cleanTitle;
+
+    if (!songName) {
+      songName = cleanYoutubeTitle(song.title);
     }
 
-    const handleSingerSubmit = useCallback(async (singerName) => {
-        if (!singerModal) return;
-        const songData = {
-            title: singerModal.title,
-            artist: singerModal.artist || '',
-            singer: singerName || '',
-            videoId: singerModal.videoId || null,
-            fallbackIds: singerModal.fallbackIds || [],
-        };
-        const item = addSong(songData);
-        showToast(`Đã thêm bài ${singerModal.title}`);
-        setSingerModal(null);
+    const msg = `Xin mời ${singer} lên sân khấu, trình bày ca khúc ${songName}`;
+    console.log("Announcing:", msg);
+    await announce(msg);
+  }, [announce]);
 
-        // If this is the first song (queue was empty), announce and play immediately
-        if (queueLength === 0) {
-            addToHistory({ title: songData.title, artist: songData.artist, singer: songData.singer });
-            await announceSinger(item, null);
-            await new Promise(r => setTimeout(r, 2000));
-            await playSong(item);
-        }
-    }, [singerModal, addSong, showToast, queueLength, addToHistory, announceSinger]);
+  // Watch invitedSongId for manual mode TTS-only announcement
+  React.useEffect(() => {
+    if (!invitedSongId || queueMode !== 'manual') return;
 
-    const handleSingerSkip = useCallback(async () => {
-        if (!singerModal) return;
-        const songData = {
-            title: singerModal.title,
-            artist: singerModal.artist || '',
-            singer: '',
-            videoId: singerModal.videoId || null,
-            fallbackIds: singerModal.fallbackIds || [],
-        };
-        const item = addSong(songData);
-        showToast(`Đã thêm bài ${singerModal.title}`);
-        setSingerModal(null);
+    const song = queue.find((s) => s.id === invitedSongId);
+    if (!song) return;
 
-        if (queueLength === 0) {
-            addToHistory({ title: songData.title, artist: songData.artist, singer: '' });
-            await announceSinger(item, null);
-            await new Promise(r => setTimeout(r, 2000));
-            await playSong(item);
-        }
-    }, [singerModal, addSong, showToast, queueLength, addToHistory, announceSinger]);
+    const doAnnounce = async () => {
+      if (song.cleanTitle) {
+        await performAnnouncement(song);
+      } else {
+        console.log("Waiting for LLM to clean title (manual invite)...");
+        await new Promise((r) => setTimeout(r, 3000));
+        await performAnnouncement(song);
+      }
+    };
 
-    const handleNext = useCallback(async () => {
-        if (queueLength === 0) return;
+    doAnnounce();
+  }, [invitedSongId, queueMode, queue, performAnnouncement]);
 
-        // Grab references to next songs BEFORE advancing (queue state is stale after setQueue)
-        const upcomingSong = queue[1];  // will become the new current
-        const afterThat = queue[2];     // will become the new next
+  React.useEffect(() => {
+    if (!currentSong) return;
+    if (currentSong.id === announcedSongId) return;
 
-        const removed = advanceQueue();
-        if (removed) {
-            setUndoItem(removed);
-            setTimeout(() => setUndoItem(null), 5000);
-        }
-
-        if (upcomingSong) {
-            addToHistory({ title: upcomingSong.title, artist: upcomingSong.artist, singer: upcomingSong.singer });
-
-            // Announce singer with TTS
-            await announceSinger(upcomingSong, afterThat || null);
-
-            // Wait for customer to walk up
-            await new Promise(r => setTimeout(r, 3000));
-
-            // Search and play on YouTube
-            await playSong(upcomingSong);
-        }
-    }, [queueLength, advanceQueue, queue, addToHistory, announceSinger]);
-
-    const handleUndo = useCallback(() => {
-        if (!undoItem) return;
-        addSong(undoItem);
-        setUndoItem(null);
-    }, [undoItem, addSong]);
-
-    const handleHotSongSelect = useCallback((song) => {
-        setShowHotSongs(false);
-        handleSelectSong({ title: song.title, artist: song.artist });
-    }, [handleSelectSong]);
-
-    function handleSaveKey() {
-        if (apiKeyInput.trim()) {
-            setApiKey(apiKeyInput.trim());
-            setShowSettings(false);
-            showToast('Đã lưu API key');
-        }
+    // In manual mode, if this song was already invited (announced), skip TTS but DON'T auto-play
+    if (queueMode === 'manual' && currentSong.id === invitedSongId) {
+      setAnnouncedSongId(currentSong.id);
+      setInvitedSongId(null);
+      // Manual mode: host clicks "Phát" manually
+      return;
     }
 
-    return (
-        <div className="app-container">
-            {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h1 style={{ fontSize: 32, fontWeight: 900 }}>🎤 KARAOKE</h1>
-                <div style={{ display: 'flex', gap: 8 }}>
-                    <div style={{ display: 'flex', gap: 5 }}>
-                        <button className="btn-secondary btn-small" onClick={() => youtube.openTVWindow(1)}>
-                            📺 TV 1
-                        </button>
-                        <button className="btn-secondary btn-small" onClick={() => youtube.openTVWindow(2)}>
-                            📺 TV 2
-                        </button>
-                    </div>
-                    <button className="btn-ghost btn-small" onClick={() => setShowSettings(!showSettings)}>
-                        ⚙️
-                    </button>
-                </div>
+    // 1. Stop playing immediately when new song loads
+    setIsPlaying(false);
+
+    // Cancel any previous mic detection
+    if (micAbortRef.current) micAbortRef.current.abort();
+    const abortController = new AbortController();
+    micAbortRef.current = abortController;
+    skipWaitRef.current = false; // Reset skip state
+
+    const doAnnounceAndPlay = async () => {
+      await performAnnouncement(currentSong);
+
+      if (abortController.signal.aborted && !skipWaitRef.current) return;
+
+      // Manual mode: announce only, don't auto-play — host clicks "Phát"
+      if (queueMode === 'manual') {
+        console.log('[Manual] Announced. Waiting for host to press Phát.');
+        setAnnouncedSongId(currentSong.id);
+        return;
+      }
+
+      // Auto mode: wait for guest to arrive on stage via mic detection
+      console.log("Waiting for guest on stage (mic detection)...");
+      setWaitingForGuest(true);
+
+      const reason = await waitForPresence(abortController.signal, setWaitCountdown);
+      setWaitingForGuest(false);
+      console.log("Mic detection resolved:", reason);
+
+      // If aborted but NOT skipped manually, stop here (it means song changed or other abort)
+      if (abortController.signal.aborted && !skipWaitRef.current) return;
+
+      setAnnouncedSongId(currentSong.id);
+      setIsPlaying(true);
+    };
+
+    // If we have the clean title, announce immediately
+    if (currentSong.cleanTitle) {
+      doAnnounceAndPlay();
+    } else {
+      // Wait up to 3 seconds for LLM to finish
+      console.log("Waiting for LLM to clean title...");
+      const timer = setTimeout(() => {
+        if (currentSong.id !== announcedSongId) {
+          console.log("LLM timed out, using fallback");
+          doAnnounceAndPlay();
+        }
+      }, 3000);
+      return () => {
+        clearTimeout(timer);
+        abortController.abort();
+        cancelDetection();
+        setWaitingForGuest(false);
+      };
+    }
+
+    return () => {
+      abortController.abort();
+      cancelDetection();
+      setWaitingForGuest(false);
+    };
+  }, [currentSong, announcedSongId, queueMode, invitedSongId, performAnnouncement, setIsPlaying, setInvitedSongId, setWaitingForGuest, waitForPresence, cancelDetection]);
+
+  // Ref must be declared above but used in effect's async callback - it's safe because
+  // the ref is populated before the async waitForPresence resolves
+  const playerContainerRef = React.useRef(null);
+
+  const handleReplay = () => triggerRestart();
+
+  const handleClearSong = () => {
+    setIsPlaying(false);
+    setCurrentSong(null);
+    setWaitingForGuest(false);
+    if (micAbortRef.current) micAbortRef.current.abort();
+    setAnnouncedSongId(null);
+  };
+
+  // Re-announce TTS for current song (manual mode)
+  const handleReAnnounce = React.useCallback(() => {
+    if (currentSong) {
+      console.log('[Manual] Re-announcing current song');
+      performAnnouncement(currentSong);
+    }
+  }, [currentSong, performAnnouncement]);
+
+  // Global Keyboard Shortcuts
+  React.useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (['INPUT', 'TEXTAREA', 'IFRAME'].includes(document.activeElement.tagName)) return;
+
+      if (e.code === 'Space') {
+        e.preventDefault();
+        handlePlayPause();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isPlaying, handlePlayPause]);
+
+  // Dynamic flex-grow values based on active panel
+  const getPanelFlex = (panel) => {
+    const baseClasses = "flex flex-col gap-4 min-w-0 overflow-hidden transition-all duration-500 ease-in-out";
+
+    switch (activePanel) {
+      case 'left':
+        if (panel === 'left') return `${baseClasses} flex-[5]`;
+        if (panel === 'center') return `${baseClasses} flex-[4]`;
+        return `${baseClasses} flex-[3]`;
+      case 'right':
+        if (panel === 'left') return `${baseClasses} flex-[2]`;
+        if (panel === 'center') return `${baseClasses} flex-[4]`;
+        return `${baseClasses} flex-[6]`;
+      case 'center':
+      default:
+        if (panel === 'left') return `${baseClasses} flex-[2]`;
+        if (panel === 'center') return `${baseClasses} flex-[6]`;
+        return `${baseClasses} flex-[2]`;
+    }
+  };
+
+  return (
+    <div className="flex flex-col lg:flex-row h-screen font-sans p-2 gap-4 bg-slate-100">
+      {/* Left Panel: Queue */}
+      <div
+        className={getPanelFlex('left')}
+        onClick={() => setActivePanel('left')}
+        onMouseEnter={() => setActivePanel('left')}
+      >
+        <Card className={`h-full flex flex-col border border-slate-200 shadow-sm bg-white overflow-hidden transition-all ${activePanel === 'left' ? 'shadow-md border-slate-300' : ''}`}>
+          <div className="p-3 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+            <h2 className="text-lg font-black text-slate-800 uppercase tracking-tighter">HÀNG CHỜ</h2>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={toggleQueueMode}
+                className={`relative inline-flex h-6 w-12 items-center rounded-full transition-colors cursor-pointer ${queueMode === 'auto' ? 'bg-indigo-500' : 'bg-slate-300'}`}
+              >
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform shadow-sm ${queueMode === 'auto' ? 'translate-x-7' : 'translate-x-1'}`} />
+              </button>
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{queueMode === 'auto' ? 'Auto' : 'Thủ Công'}</span>
             </div>
+          </div>
+          <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
+            <QueueList onReAnnounce={handleReAnnounce} />
+          </div>
+        </Card>
+      </div>
 
-            {/* Settings Panel */}
-            {showSettings && (
-                <div className="section">
-                    <div className="section-label">CÀI ĐẶT</div>
-                    <div style={{ display: 'flex', gap: 10 }}>
-                        <input
-                            type="text"
-                            value={apiKeyInput}
-                            onChange={e => setApiKeyInput(e.target.value)}
-                            placeholder="Gemini API Key..."
-                            style={{ flex: 1, fontSize: 20 }}
-                        />
-                        <button className="btn-success btn-small" onClick={handleSaveKey}>LƯU</button>
-                    </div>
-                    {getApiKey() && (
-                        <div style={{ fontSize: 16, color: 'var(--color-accent-green)', marginTop: 8 }}>
-                            ✅ Đã có API key
-                        </div>
-                    )}
-                    <div style={{ marginTop: 20, paddingTop: 20, borderTop: '1px solid #333' }}>
-                        <div className="section-label">CHẾ ĐỘ MÀN HÌNH</div>
-                        <button
-                            className={`btn-secondary btn-small ${youtube.nativeMode ? 'active' : ''}`}
-                            onClick={() => youtube.toggleNativeMode(!youtube.nativeMode)}
-                            style={{
-                                background: youtube.nativeMode ? 'var(--color-accent-red)' : undefined,
-                                width: '100%'
-                            }}
-                        >
-                            {youtube.nativeMode ? '🔴 TẮT CHẾ ĐỘ YOUTUBE (VỀ KARAOKE)' : '🟢 BẬT CHẾ ĐỘ YOUTUBE (FULL CONTROL)'}
-                        </button>
-                        <div style={{ fontSize: 14, color: '#888', marginTop: 8 }}>
-                            Cho phép điều khiển TV bằng chuột/phím và giao diện YouTube gốc.
-                        </div>
-                    </div>
-                </div>
-            )}
+      {/* Center Panel: Main Player & Controls */}
+      <div
+        className={getPanelFlex('center')}
+        onClick={() => setActivePanel('center')}
+        onMouseEnter={() => setActivePanel('center')}
+      >
+        <div className="flex justify-between items-center bg-white p-3 rounded-xl shadow-sm border border-slate-200 mb-0">
+          <h1 className="text-2xl font-black text-slate-800 tracking-tighter uppercase">KARAOKE SÁU NHÀN</h1>
 
-            {/* Preview */}
-            <Preview
-                playerState={youtube.playerState}
-                currentTime={youtube.currentTime}
-                duration={youtube.duration}
-                progress={youtube.progress}
-                formatTime={youtube.formatTime}
-                initPreviewPlayer={youtube.initPreviewPlayer}
-                onPause={youtube.pauseVideo}
-                onResume={youtube.resumeVideo}
-                onReplay={youtube.replayVideo}
-                currentVideoId={youtube.currentVideoId}
-            />
+          <div className="flex items-center gap-2">
+            <div className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full">HÁT CHO NHAU NGHE</div>
+            <button
+              onClick={isTVOpen ? closeTV : openTV}
+              className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 ${isTVOpen
+                ? 'bg-green-500 hover:bg-red-500 text-white'
+                : 'bg-indigo-500 hover:bg-indigo-600 text-white'
+                }`}
+              title={isTVOpen ? 'Đóng TV' : 'Mở TV cho khách xem'}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="3" width="20" height="14" rx="2" />
+                <path d="M8 21h8" />
+                <path d="M12 17v4" />
+              </svg>
+              {isTVOpen ? 'TV Đang Mở' : 'Mở TV'}
+            </button>
+          </div>
+        </div>
 
-            {/* Now Playing + Next Button */}
-            <NowPlaying
-                currentSong={currentSong}
-                nextSong={nextSong}
-                onNext={handleNext}
-                onCallSinger={callSinger}
-                isVideoEnded={youtube.playerState === 'ended'}
-                queueLength={queueLength}
-            />
+        {/* Player Card — no native YT controls on host */}
+        <div ref={playerContainerRef} className="player-container relative bg-black overflow-hidden shadow-lg rounded-xl aspect-video w-full">
+          <YouTubePlayer className="w-full h-full" onEnded={handleSongEnd} muted controls={false} quality="small" />
+          <WaitingOverlay countdown={waitCountdown} onSkip={handleManualStart} />
+        </div>
 
-            {/* Queue */}
-            <Queue
-                waitingQueue={waitingQueue}
-                onRemove={removeSong}
-                onMoveUp={moveUp}
-                onMoveDown={moveDown}
-                onClearAll={clearAll}
-            />
+        {/* Custom Controls: Seek + Volume */}
+        <Card className="bg-white border-0 shadow-sm rounded-xl px-3 py-2">
+          <PlayerControls />
+        </Card>
 
-            {/* Search */}
-            <SearchBar
-                onSelectSong={handleSelectSong}
-            />
-
-            {/* Hot Songs Button */}
-            <button className="btn-secondary" style={{ width: '100%' }} onClick={() => setShowHotSongs(true)}>
-                🔥 BÀI HAY HÁT
+        {/* Playback Controls */}
+        <Card className="bg-white border-0 shadow-sm rounded-xl p-3">
+          <div className="flex gap-4">
+            {/* Play/Pause */}
+            <button
+              onClick={handlePlayPause}
+              className={`flex-1 py-4 px-6 rounded-xl flex items-center justify-center gap-3 transition-all active:scale-95 shadow-lg shadow-indigo-200/50 cursor-pointer ${isPlaying
+                ? 'bg-slate-200 text-slate-600 border border-slate-300 hover:bg-slate-300'
+                : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
+            >
+              {isPlaying ? <Pause size={28} fill="currentColor" /> : <Play size={28} fill="currentColor" />}
+              <span className="text-xl font-black uppercase tracking-tight">{isPlaying ? 'Dừng' : 'Phát'}</span>
             </button>
 
-            {/* Modals */}
-            {singerModal && (
-                <SingerInput
-                    songTitle={`${singerModal.title}${singerModal.artist ? ` - ${singerModal.artist}` : ''}`}
-                    onSubmit={handleSingerSubmit}
-                    onSkip={handleSingerSkip}
-                />
-            )}
+            {/* Next */}
+            <button
+              onClick={handleNext}
+              disabled={queue.length === 0}
+              className="flex-1 py-4 px-6 rounded-xl flex items-center justify-center gap-3 bg-slate-800 text-white transition-all active:scale-95 shadow-lg shadow-slate-400/50 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-900"
+            >
+              <SkipForward size={28} fill="currentColor" />
+              <span className="text-xl font-black uppercase tracking-tight">Qua Bài</span>
+            </button>
 
-            {showHotSongs && (
-                <HotSongs
-                    hotSongs={getHotSongs()}
-                    onSelect={handleHotSongSelect}
-                    onClose={() => setShowHotSongs(false)}
-                />
-            )}
+            {/* Replay */}
+            <button
+              onClick={handleReplay}
+              disabled={!currentSong}
+              className="flex-1 py-4 px-6 rounded-xl flex items-center justify-center gap-3 bg-orange-500 text-white transition-all active:scale-95 shadow-lg shadow-orange-200/50 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-orange-600"
+            >
+              <RotateCcw size={28} />
+              <span className="text-xl font-black uppercase tracking-tight">Phát Lại</span>
+            </button>
 
-            {/* Toast */}
-            {toast && <div className="toast">{toast}</div>}
+            {/* Clear Song */}
+            <button
+              onClick={handleClearSong}
+              disabled={!currentSong}
+              className="flex-1 py-4 px-6 rounded-xl flex items-center justify-center gap-3 bg-red-500 text-white transition-all active:scale-95 shadow-lg shadow-red-200/50 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-red-600"
+            >
+              <Square size={28} fill="currentColor" />
+              <span className="text-xl font-black uppercase tracking-tight">Xóa Bài</span>
+            </button>
+          </div>
+        </Card>
+      </div>
 
-            {/* Undo Bar */}
-            {undoItem && (
-                <div className="undo-bar" onClick={handleUndo}>
-                    ↩️ Bấm đây để quay lại bài trước
-                </div>
-            )}
-        </div>
-    );
+      {/* Right Panel: Search & Suggestions */}
+      <div
+        className={getPanelFlex('right')}
+        onClick={() => setActivePanel('right')}
+        onMouseEnter={() => setActivePanel('right')}
+        onFocusCapture={() => setActivePanel('right')}
+      >
+        <Card className={`h-full flex flex-col border border-slate-200 shadow-sm bg-white overflow-hidden transition-all ${activePanel === 'right' ? 'shadow-md border-slate-300' : ''}`}>
+          <div className="p-3 border-b border-slate-100 bg-slate-50 flex items-center gap-2">
+            <Search size={18} className="text-slate-800" />
+            <h2 className="text-lg font-black text-slate-800 uppercase tracking-tighter">Tìm Kiếm</h2>
+          </div>
+
+          <div className="flex-1 overflow-hidden relative">
+            <SearchBar isExpanded={activePanel === 'right'} />
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+};
+
+function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<ControlPanel />} />
+        <Route path="/projection" element={<ValidationView />} />
+      </Routes>
+    </BrowserRouter>
+  );
 }
+
+export default App;

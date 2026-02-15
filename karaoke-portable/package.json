@@ -1,0 +1,8 @@
+{
+  "name": "karaoke-portable",
+  "version": "3.0.0",
+  "type": "module",
+  "dependencies": {
+    "youtubei.js": "^16.0.1"
+  }
+}

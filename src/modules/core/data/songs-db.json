@@ -1,0 +1,277 @@
+[
+    {
+        "title": "Duyên Phận",
+        "artist": "Như Quỳnh",
+        "aliases": [
+            "duyen phan",
+            "nhu quynh",
+            "phan duyen"
+        ],
+        "popularity": 100
+    },
+    {
+        "title": "Sầu Tím Thiệp Hồng",
+        "artist": "Quang Lê - Lệ Quyên",
+        "aliases": [
+            "sau tim thiep hong",
+            "quang le",
+            "le quyen"
+        ],
+        "popularity": 98
+    },
+    {
+        "title": "Vùng Lá Me Bay",
+        "artist": "Như Quỳnh",
+        "aliases": [
+            "vung la me bay",
+            "nhu quynh"
+        ],
+        "popularity": 95
+    },
+    {
+        "title": "Chuyện Giàn Thiên Lý",
+        "artist": "Mạnh Quỳnh",
+        "aliases": [
+            "chuyen gian thien ly",
+            "manh quynh"
+        ],
+        "popularity": 90
+    },
+    {
+        "title": "Em Của Ngày Hôm Qua",
+        "artist": "Sơn Tùng M-TP",
+        "aliases": [
+            "em cua ngay hom qua",
+            "son tung",
+            "mtp"
+        ],
+        "popularity": 99
+    },
+    {
+        "title": "Lạc Trôi",
+        "artist": "Sơn Tùng M-TP",
+        "aliases": [
+            "lac troi",
+            "son tung"
+        ],
+        "popularity": 97
+    },
+    {
+        "title": "Nơi Này Có Anh",
+        "artist": "Sơn Tùng M-TP",
+        "aliases": [
+            "noi nay co anh",
+            "son tung"
+        ],
+        "popularity": 96
+    },
+    {
+        "title": "Hồng Nhan",
+        "artist": "Jack",
+        "aliases": [
+            "hong nhan",
+            "jack"
+        ],
+        "popularity": 94
+    },
+    {
+        "title": "Bạc Phận",
+        "artist": "Jack",
+        "aliases": [
+            "bac phan",
+            "jack"
+        ],
+        "popularity": 93
+    },
+    {
+        "title": "Sóng Gió",
+        "artist": "Jack - K-ICM",
+        "aliases": [
+            "song gio",
+            "jack",
+            "kicm"
+        ],
+        "popularity": 92
+    },
+    {
+        "title": "Ai Chung Tình Được Mãi",
+        "artist": "Đinh Tùng Huy",
+        "aliases": [
+            "ai chung tinh duoc mai",
+            "dinh tung huy"
+        ],
+        "popularity": 91
+    },
+    {
+        "title": "Thuyền Quyên",
+        "artist": "Diệu Kiên",
+        "aliases": [
+            "thuyen quyen",
+            "dieu kien"
+        ],
+        "popularity": 89
+    },
+    {
+        "title": "Mời Anh Về Thăm Quê Em",
+        "artist": "Thùy Trang",
+        "aliases": [
+            "moi anh ve tham que em",
+            "thuy trang"
+        ],
+        "popularity": 88
+    },
+    {
+        "title": "Áo Mới Cà Mau",
+        "artist": "Phi Nhung",
+        "aliases": [
+            "ao moi ca mau",
+            "phi nhung"
+        ],
+        "popularity": 87
+    },
+    {
+        "title": "Trách Ai Vô Tình",
+        "artist": "Phi Nhung",
+        "aliases": [
+            "trach ai vo tinh",
+            "phi nhung"
+        ],
+        "popularity": 86
+    },
+    {
+        "title": "Chim Trắng Mồ Côi",
+        "artist": "Đan Trường - Cẩm Ly",
+        "aliases": [
+            "chim trang mo coi",
+            "dan truong",
+            "cam ly"
+        ],
+        "popularity": 92
+    },
+    {
+        "title": "Cắt Đôi Nỗi Sầu",
+        "artist": "Tăng Duy Tân",
+        "aliases": [
+            "cat doi noi sau",
+            "tang duy tan"
+        ],
+        "popularity": 94
+    },
+    {
+        "title": "Bên Trên Tầng Lầu",
+        "artist": "Tăng Duy Tân",
+        "aliases": [
+            "ben tren tang lau",
+            "tang duy tan"
+        ],
+        "popularity": 93
+    },
+    {
+        "title": "See Tình",
+        "artist": "Hoàng Thùy Linh",
+        "aliases": [
+            "see tinh",
+            "hoang thuy linh"
+        ],
+        "popularity": 95
+    },
+    {
+        "title": "Để Mị Nói Cho Mà Nghe",
+        "artist": "Hoàng Thùy Linh",
+        "aliases": [
+            "de mi noi cho ma nghe",
+            "hoang thuy linh"
+        ],
+        "popularity": 90
+    },
+    {
+        "title": "Ngày Mai Người Ta Lấy Chồng",
+        "artist": "Thành Đạt",
+        "aliases": [
+            "ngay mai nguoi ta lay chong",
+            "thanh dat"
+        ],
+        "popularity": 91
+    },
+    {
+        "title": "Hoa Nở Không Màu",
+        "artist": "Hoài Lâm",
+        "aliases": [
+            "hoa no khong mau",
+            "hoai lam"
+        ],
+        "popularity": 96
+    },
+    {
+        "title": "Buồn Làm Chi Em Ơi",
+        "artist": "Hoài Lâm",
+        "aliases": [
+            "buon lam chi em oi",
+            "hoai lam"
+        ],
+        "popularity": 94
+    },
+    {
+        "title": "Gõ Cửa Trái Tim",
+        "artist": "Quang Lê - Mai Thiên Vân",
+        "aliases": [
+            "go cua trai tim",
+            "quang le"
+        ],
+        "popularity": 89
+    },
+    {
+        "title": "Đắp Mộ Cuộc Tình",
+        "artist": "Đan Nguyên",
+        "aliases": [
+            "dap mo cuoc tinh",
+            "dan nguyen"
+        ],
+        "popularity": 92
+    },
+    {
+        "title": "Lại Nhớ Người Yêu",
+        "artist": "Đan Nguyên",
+        "aliases": [
+            "lai nho nguoi yeu",
+            "dan nguyen"
+        ],
+        "popularity": 88
+    },
+    {
+        "title": "Xuân Này Con Không Về",
+        "artist": "Quang Lê",
+        "aliases": [
+            "xuan nay con khong ve",
+            "quang le"
+        ],
+        "popularity": 90
+    },
+    {
+        "title": "Cánh Thiệp Đầu Xuân",
+        "artist": "Như Quỳnh",
+        "aliases": [
+            "canh thiep dau xuan",
+            "nhu quynh"
+        ],
+        "popularity": 85
+    },
+    {
+        "title": "Câu Hẹn Câu Thề",
+        "artist": "Đình Dũng",
+        "aliases": [
+            "cau hen cau the",
+            "dinh dung"
+        ],
+        "popularity": 87
+    },
+    {
+        "title": "Đế Vương",
+        "artist": "Đình Dũng",
+        "aliases": [
+            "de vuong",
+            "dinh dung"
+        ],
+        "popularity": 89
+    }
+]
