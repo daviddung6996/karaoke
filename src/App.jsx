@@ -1,15 +1,15 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 
 import QueueList from './modules/queue/QueueList';
 import SearchBar from './modules/search/SearchBar';
-import Button from './modules/ui/Button';
 import Card from './modules/ui/Card';
 import { usePlayerSync } from './modules/player/usePlayerSync';
 import ValidationView from './modules/projection/ValidationView';
-import YouTubePlayer from './modules/player/YouTubePlayer';
+import PreviewPlayer from './modules/player/PreviewPlayer';
 import WaitingOverlay from './modules/player/WaitingOverlay';
 import PlayerControls from './modules/player/PlayerControls';
+import DisplayModeToggle from './modules/ui/DisplayModeToggle';
 
 import { Search, Play, Pause, SkipForward, RotateCcw, Square } from 'lucide-react';
 import { useAppStore } from './modules/core/store';
@@ -17,29 +17,142 @@ import { useTTS } from './modules/core/useTTS';
 import { useMicDetection } from './modules/core/useMicDetection';
 import { cleanYoutubeTitle } from './utils/titleUtils';
 import { useTVWindow } from './modules/core/useTVWindow';
+import { useFirebaseSync } from './modules/core/useFirebaseSync';
+import { useSessionRestore, saveCurrentSongToSession } from './modules/core/useSessionRestore';
+import { setNowPlaying, clearNowPlaying, removeFromFirebaseQueue } from './services/firebaseQueueService';
 
 const ControlPanel = () => {
-  // Sync state to TV window via BroadcastChannel
-  usePlayerSync('host');
-  const [activePanel, setActivePanel] = React.useState('center'); // 'left', 'center', 'right'
 
-  const { isPlaying, setIsPlaying, triggerRestart, queue, removeFromQueue, setCurrentSong, currentSong, queueMode, toggleQueueMode, invitedSongId, setInvitedSongId, setWaitingForGuest, waitCountdown, setWaitCountdown } = useAppStore();
-  const { announce } = useTTS();
-  const { waitForPresence, cancelDetection } = useMicDetection();
-  const { isTVOpen, openTV, closeTV } = useTVWindow();
-  const micAbortRef = React.useRef(null);
-  const skipWaitRef = React.useRef(false);
+  // Get store actions
+  const { isPlaying, setIsPlaying, triggerRestart, queue, addToQueue, removeFromQueue, reorderQueue, setCurrentSong, currentSong, queueMode, toggleQueueMode, invitedSongId, setInvitedSongId, setWaitingForGuest, waitCountdown, setWaitCountdown, setCountdownPaused, setMicAttemptHint } = useAppStore();
 
+  // Session restore logic (F5 vs fresh session)
+  // Pass reorderQueue to restore queue from session
+  const { isRefresh, isRestoredSong, setIsRestoredSong } = useSessionRestore(setCurrentSong, setIsPlaying, reorderQueue);
 
+  // Persist queue to session storage whenever it changes
+  React.useEffect(() => {
+    import('./modules/core/useSessionRestore').then(({ saveQueueToSession }) => {
+      saveQueueToSession(queue);
+    });
+  }, [queue]);
 
+  // Define handleSongEnd before usePlayerSync to avoid dependency cycles if we were to pass it
+  // But wait, handleNext depends on Queue. Queue changes. 
+  // We can use a ref or just rely on the latest closure if usePlayerSync updates its listener.
+  // In usePlayerSync, we added `onSongEnded` to the dependency array of the effect.
+  // So if handleSongEnd changes, the effect re-subscribes. 
+  // This is fine.
 
-  const handlePlayPause = () => {
-    // If no song is loaded but queue has songs, pull the first one
-    if (!currentSong && queue.length > 0) {
+  const handleNext = () => {
+    if (queue.length > 0) {
       const nextSong = queue[0];
       setCurrentSong(nextSong);
       removeFromQueue(nextSong.id);
-      // setIsPlaying(true) will be triggered by the doAnnounceAndPlay effect
+    } else {
+      setIsPlaying(false);
+      setCurrentSong(null); // Clear current song to indicate "Idle" state
+    }
+  };
+
+  const handleSongEnd = React.useCallback(() => {
+    console.log("Song ended. Auto-playing next...");
+    handleNext();
+  }, [queue, removeFromQueue, setCurrentSong, setIsPlaying]);
+
+  // Sync state to TV window & Firebase queue
+  usePlayerSync('host', { onSongEnded: handleSongEnd });
+  useFirebaseSync(isRefresh);
+
+  // Auto-play: block until session restore is done on F5
+  // sessionStorage restore is synchronous so currentSong is set before first render completes
+  const [restoreComplete, setRestoreComplete] = React.useState(!isRefresh);
+  React.useEffect(() => {
+    if (!isRefresh) return;
+    if (isRestoredSong || currentSong) {
+      setRestoreComplete(true);
+    }
+  }, [isRefresh, isRestoredSong, currentSong]);
+  // Fallback timeout: if no song was saved, unblock auto-play after 500ms
+  React.useEffect(() => {
+    if (isRefresh && !restoreComplete) {
+      const timer = setTimeout(() => setRestoreComplete(true), 500);
+      return () => clearTimeout(timer);
+    }
+  }, [isRefresh, restoreComplete]);
+
+  React.useEffect(() => {
+    if (!restoreComplete) return;
+    if (!currentSong && queue.length > 0 && queueMode === 'auto') {
+      console.log('[AutoPlay] Idle state detected with songs in queue. Auto-playing...');
+      const nextSong = queue[0];
+      setCurrentSong(nextSong);
+      removeFromQueue(nextSong.id);
+    }
+  }, [currentSong, queue, queueMode, setCurrentSong, removeFromQueue, restoreComplete]);
+
+  const [activePanel, setActivePanel] = React.useState('center'); // 'left', 'center', 'right'
+  const { announce } = useTTS();
+  const { waitForPresence, cancelDetection } = useMicDetection();
+  const { isTVOpen, openTV, closeTV } = useTVWindow();
+
+  // Auto-start: ensure extend mode and open TV on secondary screen at launch
+  const autoStartedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (autoStartedRef.current) return;
+    autoStartedRef.current = true;
+    fetch('/api/display/extend', { method: 'POST' })
+      .then(() => { setTimeout(() => openTV(), 1500); })
+      .catch(() => { openTV(); }); // Even if endpoint fails, try opening TV
+  }, [openTV]);
+
+  const micAbortRef = React.useRef(null);
+  const skipWaitRef = React.useRef(false);
+
+  // Sync currentSong to Firebase for customer-web
+  const initialLoadRef = React.useRef(true);
+
+  React.useEffect(() => {
+    // SKIP clearing on initial load if it's a refresh (wait for restore)
+    if (initialLoadRef.current) {
+      initialLoadRef.current = false;
+      if (isRefresh && !currentSong) {
+        console.log('[App] Skipping initial clearNowPlaying due to refresh');
+        return;
+      }
+    }
+
+    if (currentSong) {
+      saveCurrentSongToSession(currentSong);
+      setNowPlaying(currentSong).catch(() => { });
+      // SAFETY: Ensure it's removed from Firebase queue so it doesn't show as "Upcoming" on customer devices
+      // Only do this if the song has a firebaseKey (not a restored song which uses videoId as id)
+      if (currentSong.firebaseKey) {
+        console.log('[App] Force removing playing song from Firebase queue:', currentSong.firebaseKey);
+        removeFromFirebaseQueue(currentSong.firebaseKey).catch(err => console.warn('Force remove failed:', err));
+      }
+    } else {
+      saveCurrentSongToSession(null);
+      clearNowPlaying().catch(() => { });
+    }
+  }, [currentSong, isRefresh]);
+
+  const handlePlayPause = () => {
+    // If the current song is staged (waiting for manual start after a delete),
+    // we simply un-stage it and start playing/announcing.
+    if (currentSong?.isStaged) {
+      const activeSong = { ...currentSong, isStaged: false };
+      setCurrentSong(activeSong);
+      setIsPlaying(true);
+      return;
+    }
+
+    // Logic handled by active effect above, but manual override needs care
+    if (!currentSong && queue.length > 0) {
+      // Manual trigger for first song (if effect didn't catch it yet or manual mode)
+      const nextSong = queue[0];
+      setCurrentSong(nextSong);
+      removeFromQueue(nextSong.id);
       return;
     }
     setIsPlaying(!isPlaying);
@@ -50,25 +163,7 @@ const ControlPanel = () => {
     if (micAbortRef.current) micAbortRef.current.abort();
   };
 
-  const handleNext = () => {
-    if (queue.length > 0) {
-      const nextSong = queue[0];
-      setCurrentSong(nextSong);
-      removeFromQueue(nextSong.id);
-    } else {
-      // Optional: clear current song if queue empty? 
-      // For now, let's just stop playing or keep last song. 
-      // User might want to replay. 
-      // Let's just stop.
-      setIsPlaying(false);
-    }
-  };
 
-  const handleSongEnd = () => {
-    console.log("Song ended. Auto-playing next...");
-    // Queue empty — just stop. TV window stays open for reuse.
-    handleNext();
-  };
 
   // Auto-announce when song changes
   const [announcedSongId, setAnnouncedSongId] = React.useState(null);
@@ -101,14 +196,27 @@ const ControlPanel = () => {
         await new Promise((r) => setTimeout(r, 3000));
         await performAnnouncement(song);
       }
+      // After announcement, set as current song and start playback so TV auto-plays
+      setCurrentSong(song);
+      removeFromQueue(song.id);
+      setIsPlaying(true);
     };
 
     doAnnounce();
-  }, [invitedSongId, queueMode, queue, performAnnouncement]);
+  }, [invitedSongId, queueMode, queue, performAnnouncement, setCurrentSong, removeFromQueue, setIsPlaying]);
 
   React.useEffect(() => {
     if (!currentSong) return;
+    if (currentSong.isStaged) return; // Skip if staged (waiting for manual start)
     if (currentSong.id === announcedSongId) return;
+
+    // Skip TTS announcement for restored songs on F5 refresh
+    if (isRestoredSong) {
+      console.log('[App] Skipping announcement for restored song:', currentSong.title);
+      setAnnouncedSongId(currentSong.id);
+      setIsRestoredSong(false); // Reset for next time
+      return;
+    }
 
     // In manual mode, if this song was already invited (announced), skip TTS but DON'T auto-play
     if (queueMode === 'manual' && currentSong.id === invitedSongId) {
@@ -143,8 +251,13 @@ const ControlPanel = () => {
       console.log("Waiting for guest on stage (mic detection)...");
       setWaitingForGuest(true);
 
-      const reason = await waitForPresence(abortController.signal, setWaitCountdown);
+      const reason = await waitForPresence(abortController.signal, setWaitCountdown, (level) => {
+        setMicAttemptHint(level);
+        // Auto-clear hint after 3s
+        setTimeout(() => setMicAttemptHint(null), 3000);
+      });
       setWaitingForGuest(false);
+      setMicAttemptHint(null);
       console.log("Mic detection resolved:", reason);
 
       // If aborted but NOT skipped manually, stop here (it means song changed or other abort)
@@ -179,20 +292,27 @@ const ControlPanel = () => {
       cancelDetection();
       setWaitingForGuest(false);
     };
-  }, [currentSong, announcedSongId, queueMode, invitedSongId, performAnnouncement, setIsPlaying, setInvitedSongId, setWaitingForGuest, waitForPresence, cancelDetection]);
+  }, [currentSong, announcedSongId, queueMode, invitedSongId, isRestoredSong, performAnnouncement, setIsPlaying, setInvitedSongId, setWaitingForGuest, setIsRestoredSong, waitForPresence, cancelDetection, setMicAttemptHint]);
 
-  // Ref must be declared above but used in effect's async callback - it's safe because
-  // the ref is populated before the async waitForPresence resolves
   const playerContainerRef = React.useRef(null);
 
   const handleReplay = () => triggerRestart();
 
   const handleClearSong = () => {
     setIsPlaying(false);
-    setCurrentSong(null);
     setWaitingForGuest(false);
     if (micAbortRef.current) micAbortRef.current.abort();
     setAnnouncedSongId(null);
+
+    // If queue has songs, STAGE the next one (don't play yet)
+    // This allows the Host to see it, but TV remains idle
+    if (queue.length > 0) {
+      const nextSong = { ...queue[0], isStaged: true };
+      setCurrentSong(nextSong);
+      removeFromQueue(nextSong.id);
+    } else {
+      setCurrentSong(null);
+    }
   };
 
   // Re-announce TTS for current song (manual mode)
@@ -220,7 +340,7 @@ const ControlPanel = () => {
 
   // Dynamic flex-grow values based on active panel
   const getPanelFlex = (panel) => {
-    const baseClasses = "flex flex-col gap-4 min-w-0 overflow-hidden transition-all duration-500 ease-in-out";
+    const baseClasses = "flex flex-col gap-4 min-w-0 overflow-hidden transition-[flex] duration-500 ease-in-out will-change-[flex]";
 
     switch (activePanel) {
       case 'left':
@@ -275,30 +395,16 @@ const ControlPanel = () => {
         <div className="flex justify-between items-center bg-white p-3 rounded-xl shadow-sm border border-slate-200 mb-0">
           <h1 className="text-2xl font-black text-slate-800 tracking-tighter uppercase">KARAOKE SÁU NHÀN</h1>
 
-          <div className="flex items-center gap-2">
-            <div className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full">HÁT CHO NHAU NGHE</div>
-            <button
-              onClick={isTVOpen ? closeTV : openTV}
-              className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 ${isTVOpen
-                ? 'bg-green-500 hover:bg-red-500 text-white'
-                : 'bg-indigo-500 hover:bg-indigo-600 text-white'
-                }`}
-              title={isTVOpen ? 'Đóng TV' : 'Mở TV cho khách xem'}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="2" y="3" width="20" height="14" rx="2" />
-                <path d="M8 21h8" />
-                <path d="M12 17v4" />
-              </svg>
-              {isTVOpen ? 'TV Đang Mở' : 'Mở TV'}
-            </button>
-          </div>
+          <DisplayModeToggle openTV={openTV} closeTV={closeTV} isTVOpen={isTVOpen} />
         </div>
 
         {/* Player Card — no native YT controls on host */}
         <div ref={playerContainerRef} className="player-container relative bg-black overflow-hidden shadow-lg rounded-xl aspect-video w-full">
-          <YouTubePlayer className="w-full h-full" onEnded={handleSongEnd} muted controls={false} quality="small" />
-          <WaitingOverlay countdown={waitCountdown} onSkip={handleManualStart} />
+          <PreviewPlayer className="w-full h-full" />
+          <WaitingOverlay countdown={waitCountdown} onSkip={handleManualStart} onPauseToggle={() => {
+            const store = useAppStore.getState();
+            store.setCountdownPaused(!store.countdownPaused);
+          }} />
         </div>
 
         {/* Custom Controls: Seek + Volume */}

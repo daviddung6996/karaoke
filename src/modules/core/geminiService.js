@@ -1,8 +1,6 @@
 
 const API_KEY = import.meta.env.VITE_GEMINI_KEY;
-const MODEL = 'gemini-2.5-flash'; // User requested 2.5 flash, verified available. 
-// Actually user said "Gemini 2.5 Flash". I will stick to 1.5-flash url if 2.5 isn't resolved, or try likely 1.5-flash.
-// Let's use the standard flash endpoint. 
+const MODEL = 'gemini-2.5-flash';
 const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 
 // Helper to clean JSON string
@@ -100,7 +98,8 @@ const fetchGeminiRaw = async (input, signal) => {
         });
 
         if (!response.ok) {
-            console.warn("Gemini API Error:", response.status);
+            const errBody = await response.text().catch(() => '');
+            console.warn("Gemini API Error:", response.status, errBody);
             return null;
         }
 

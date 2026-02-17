@@ -1,13 +1,23 @@
 import { useCallback, useRef } from 'react';
+import { useAppStore } from './store';
 
-const MAX_WAIT_MS = 30000;
+const MAX_WAIT_MS = 45000;
 
-// Detection config - bar environment, mic ~3m from laptop
-const SPIKE_THRESHOLD = 0.30;   // Deliberate mic tap/pop from 3m
-const VOICE_THRESHOLD = 0.12;   // Clear "alo" into mic from 3m
-const VOICE_SUSTAINED_MS = 1000; // Must persist 1s
-const RMS_JUMP_THRESHOLD = 0.10; // Deliberate sound change
-const RMS_MIN_AFTER_JUMP = 0.08; // Above bar ambient floor
+// ── Strict detection config ──
+// Laptop mic 3m from amli speakers. Must ignore TTS bleed, ambient bar noise,
+// background music, crowd chatter. Only trigger on karaoke mic → amli → loud output.
+const SPIKE_THRESHOLD = 0.5;         // Lowered from 0.75
+const SPIKE_CONFIRM_FRAMES = 4;      // Lowered from 6 (~60ms)
+const VOICE_SUSTAINED_MS = 1500;     // Lowered from 2500ms
+const RMS_JUMP_MULTIPLIER = 2.0;     // Lowered from 3.0
+const SETTLE_MS = 3000;              // 3s settle - wait for TTS echo to fully die
+
+// Voice frequency band (human voice ~85-1100 Hz)
+const VOICE_FREQ_LOW = 85;
+const VOICE_FREQ_HIGH = 1100;
+
+// Adaptive noise floor
+const NOISE_FLOOR_SAMPLES = 30;      // Collect 30 samples during settle to establish baseline
 
 export const useMicDetection = () => {
     const streamRef = useRef(null);
@@ -26,31 +36,36 @@ export const useMicDetection = () => {
 
     /**
      * Wait for mic activity: tap, pop, switch-on, or sustained voice.
-     * Also provides a countdown callback for UI.
+     * Uses adaptive noise floor to handle varying ambient environments.
      * @param {AbortSignal} signal
-     * @param {(secondsLeft: number) => void} onTick - Called every second with remaining time
+     * @param {(secondsLeft: number) => void} onTick
+     * @param {(level: 'weak'|'medium') => void} onMicAttempt - fires when partial mic activity detected
      * @returns {Promise<'mic'|'timeout'|'abort'>}
      */
-    const waitForPresence = useCallback((signal, onTick) => {
+    const waitForPresence = useCallback((signal, onTick, onMicAttempt) => {
         return new Promise(async (resolve) => {
             if (signal?.aborted) { resolve('abort'); return; }
 
             let resolved = false;
-            const startTime = Date.now();
+            let lastAttemptTime = 0;
+            let activeElapsed = 0;
+            let lastTickTime = Date.now();
 
-            // Countdown ticker
             const tickInterval = setInterval(() => {
-                const elapsed = Date.now() - startTime;
-                const secondsLeft = Math.max(0, Math.ceil((MAX_WAIT_MS - elapsed) / 1000));
+                const now = Date.now();
+                const isPaused = useAppStore?.getState?.()?.countdownPaused || false;
+                if (!isPaused) {
+                    activeElapsed += (now - lastTickTime);
+                }
+                lastTickTime = now;
+                const secondsLeft = Math.max(0, Math.ceil((MAX_WAIT_MS - activeElapsed) / 1000));
                 if (onTick) onTick(secondsLeft);
+                if (activeElapsed >= MAX_WAIT_MS) done('timeout');
             }, 1000);
-
-            const timeoutId = setTimeout(() => done('timeout'), MAX_WAIT_MS);
 
             const done = (reason) => {
                 if (resolved) return;
                 resolved = true;
-                clearTimeout(timeoutId);
                 clearInterval(tickInterval);
                 cleanup();
                 resolve(reason);
@@ -60,7 +75,6 @@ export const useMicDetection = () => {
                 signal.addEventListener('abort', () => done('abort'), { once: true });
             }
 
-            // Fire initial tick
             if (onTick) onTick(Math.ceil(MAX_WAIT_MS / 1000));
 
             try {
@@ -70,7 +84,6 @@ export const useMicDetection = () => {
 
                 const audioCtx = new AudioContext();
                 audioCtxRef.current = audioCtx;
-                // CRITICAL: AudioContext may be suspended without user gesture
                 if (audioCtx.state === 'suspended') {
                     console.log('[Mic] AudioContext suspended, resuming...');
                     await audioCtx.resume();
@@ -78,21 +91,50 @@ export const useMicDetection = () => {
                 console.log('[Mic] AudioContext state:', audioCtx.state, '| Stream active:', stream.active);
                 const source = audioCtx.createMediaStreamSource(stream);
                 const analyser = audioCtx.createAnalyser();
-                analyser.fftSize = 1024;
-                analyser.smoothingTimeConstant = 0.3;
+                analyser.fftSize = 2048;
+                analyser.smoothingTimeConstant = 0.6; // Heavier smoothing
                 source.connect(analyser);
 
+                const sampleRate = audioCtx.sampleRate;
+                const binCount = analyser.frequencyBinCount;
+                const freqPerBin = sampleRate / analyser.fftSize;
+
+                const voiceBinLow = Math.floor(VOICE_FREQ_LOW / freqPerBin);
+                const voiceBinHigh = Math.min(Math.ceil(VOICE_FREQ_HIGH / freqPerBin), binCount - 1);
+                const voiceBinRange = voiceBinHigh - voiceBinLow + 1;
+
                 const timeData = new Float32Array(analyser.fftSize);
-                const freqData = new Uint8Array(analyser.frequencyBinCount);
+                const freqData = new Uint8Array(binCount);
+
+                // ── Adaptive noise floor state ──
+                const noiseFloorSamples = [];
+                let noiseFloorPeak = 0;
+                let noiseFloorVoiceRms = 0;
+                let noiseEstablished = false;
+
                 let voiceAboveSince = null;
-                let prevRms = 0;
                 let settled = false;
                 let debugCounter = 0;
-                const settleTime = Date.now() + 500; // 500ms settle
+                let spikeFrames = 0;
+                let settleTime = 0; // Will be set after warmup
 
                 const check = () => {
                     if (resolved) return;
+                    if (signal?.aborted) { done('abort'); return; }
 
+                    // WARMUP: Ignore first 10s (active time) to avoid handling noise from previous song/walking
+                    if (activeElapsed < 10000) {
+                        requestAnimationFrame(check);
+                        return;
+                    }
+
+                    // Start settle timer once warmup is done
+                    if (!settleTime) {
+                        console.log('[Mic] Warmup done. Starting noise floor collection...');
+                        settleTime = Date.now() + SETTLE_MS;
+                    }
+
+                    // ── Time-domain: peak ──
                     analyser.getFloatTimeDomainData(timeData);
                     let peak = 0;
                     for (let i = 0; i < timeData.length; i++) {
@@ -100,62 +142,114 @@ export const useMicDetection = () => {
                         if (abs > peak) peak = abs;
                     }
 
+                    // ── Frequency-domain: voice-band RMS ──
                     analyser.getByteFrequencyData(freqData);
-                    let sum = 0;
-                    for (let i = 0; i < freqData.length; i++) {
-                        sum += (freqData[i] / 255) ** 2;
+                    let sumAll = 0;
+                    let sumVoice = 0;
+                    for (let i = 0; i < binCount; i++) {
+                        const val = (freqData[i] / 255) ** 2;
+                        sumAll += val;
+                        if (i >= voiceBinLow && i <= voiceBinHigh) {
+                            sumVoice += val;
+                        }
                     }
-                    const rms = Math.sqrt(sum / freqData.length);
+                    const rms = Math.sqrt(sumAll / binCount);
+                    const voiceRms = Math.sqrt(sumVoice / voiceBinRange);
+                    const voiceRatio = rms > 0.001 ? voiceRms / rms : 0;
 
+                    // ── Settle phase: collect noise floor samples ──
                     if (!settled) {
-                        if (Date.now() > settleTime) settled = true;
-                        prevRms = rms;
+                        if (Date.now() > settleTime) {
+                            settled = true;
+                            // Calculate noise floor from samples
+                            if (noiseFloorSamples.length > 0) {
+                                const peaks = noiseFloorSamples.map(s => s.peak).sort((a, b) => a - b);
+                                const voiceRmses = noiseFloorSamples.map(s => s.voiceRms).sort((a, b) => a - b);
+                                // Use 90th percentile as noise floor (ignore outliers)
+                                const p90 = Math.floor(noiseFloorSamples.length * 0.9);
+                                noiseFloorPeak = peaks[p90] || peaks[peaks.length - 1];
+                                noiseFloorVoiceRms = voiceRmses[p90] || voiceRmses[voiceRmses.length - 1];
+                                noiseEstablished = true;
+                            }
+                            console.log(`[Mic] Noise floor established: peak=${noiseFloorPeak.toFixed(3)} voiceRms=${noiseFloorVoiceRms.toFixed(3)} (from ${noiseFloorSamples.length} samples)`);
+                        } else {
+                            // Collect samples every ~3 frames for variety
+                            if (debugCounter % 3 === 0) {
+                                noiseFloorSamples.push({ peak, voiceRms, rms });
+                            }
+                            debugCounter++;
+                        }
                         requestAnimationFrame(check);
                         return;
                     }
 
-                    // Debug: log levels every ~60 frames (~1s)
+                    // ── Active detection phase ──
                     debugCounter++;
                     if (debugCounter % 60 === 0) {
-                        console.log(`[Mic] peak=${peak.toFixed(3)} rms=${rms.toFixed(3)} prevRms=${prevRms.toFixed(3)}`);
+                        console.log(`[Mic] peak=${peak.toFixed(3)} voiceRms=${voiceRms.toFixed(3)} ratio=${voiceRatio.toFixed(2)} | floor: peak=${noiseFloorPeak.toFixed(3)} voiceRms=${noiseFloorVoiceRms.toFixed(3)}`);
                     }
 
-                    // 1. Spike detection
-                    if (peak > SPIKE_THRESHOLD) {
-                        console.log("Mic detection: SPIKE detected! Peak:", peak.toFixed(3));
-                        done('mic');
-                        return;
-                    }
+                    // Dynamic thresholds based on noise floor
+                    const effectiveSpike = Math.max(SPIKE_THRESHOLD, noiseFloorPeak * 2.5);
+                    const effectiveVoiceThreshold = noiseEstablished
+                        ? Math.max(noiseFloorVoiceRms * RMS_JUMP_MULTIPLIER, 0.15)
+                        : 0.25;
 
-                    // 2. Sudden RMS jump
-                    const rmsJump = rms - prevRms;
-                    if (rmsJump > RMS_JUMP_THRESHOLD && rms > RMS_MIN_AFTER_JUMP) {
-                        console.log("Mic detection: RMS JUMP detected!", prevRms.toFixed(3), "->", rms.toFixed(3));
-                        done('mic');
-                        return;
-                    }
-
-                    // 3. Sustained voice
-                    if (rms > VOICE_THRESHOLD) {
-                        if (!voiceAboveSince) {
-                            voiceAboveSince = Date.now();
-                        } else if (Date.now() - voiceAboveSince >= VOICE_SUSTAINED_MS) {
-                            console.log("Mic detection: sustained voice! RMS:", rms.toFixed(3));
+                    // ── 1. Spike detection (loud sustained burst from amli) ──
+                    if (peak > effectiveSpike) {
+                        spikeFrames++;
+                        if (spikeFrames >= SPIKE_CONFIRM_FRAMES) {
+                            console.log(`[Mic] SPIKE confirmed! peak=${peak.toFixed(3)} threshold=${effectiveSpike.toFixed(3)} frames=${spikeFrames}`);
                             done('mic');
                             return;
                         }
                     } else {
+                        spikeFrames = 0;
+                    }
+
+                    // ── 2. Sustained voice from karaoke mic → amli → laptop mic ──
+                    // Voice-band energy must be significantly above noise floor AND
+                    // voice ratio must be dominant (not just general loud noise)
+                    if (voiceRms > effectiveVoiceThreshold && voiceRatio > 0.5) {
+                        if (!voiceAboveSince) {
+                            voiceAboveSince = Date.now();
+                            console.log(`[Mic] Voice candidate started: voiceRms=${voiceRms.toFixed(3)} threshold=${effectiveVoiceThreshold.toFixed(3)}`);
+                        } else if (Date.now() - voiceAboveSince >= VOICE_SUSTAINED_MS) {
+                            console.log(`[Mic] Sustained voice confirmed! voiceRms=${voiceRms.toFixed(3)} ratio=${voiceRatio.toFixed(2)} duration=${VOICE_SUSTAINED_MS}ms`);
+                            done('mic');
+                            return;
+                        }
+                    } else {
+                        if (voiceAboveSince) {
+                            console.log(`[Mic] Voice candidate dropped after ${Date.now() - voiceAboveSince}ms`);
+                        }
                         voiceAboveSince = null;
                     }
 
-                    prevRms = rms * 0.3 + prevRms * 0.7;
+                    // ── 3. Near-miss detection: guest is trying but not loud enough ──
+                    if (onMicAttempt && noiseEstablished) {
+                        const now = Date.now();
+                        if (now - lastAttemptTime > 2000) {
+                            const peakRatio = peak / effectiveSpike;
+                            const voiceRatio2 = voiceRms / effectiveVoiceThreshold;
+                            const strength = Math.max(peakRatio, voiceRatio2);
+
+                            if (strength > 0.5 && strength < 1.0) {
+                                lastAttemptTime = now;
+                                onMicAttempt('medium');
+                            } else if (strength > 0.2 && strength < 0.5) {
+                                lastAttemptTime = now;
+                                onMicAttempt('weak');
+                            }
+                        }
+                    }
+
                     requestAnimationFrame(check);
                 };
 
                 check();
             } catch (err) {
                 console.warn("Mic detection unavailable:", err.message);
-                // No mic → will just wait for timeout
             }
         });
     }, [cleanup]);

@@ -3,6 +3,13 @@ import YouTube from 'react-youtube';
 import { useAppStore } from '../core/store';
 import { registerPlayer, unregisterPlayer, playPlayer, pausePlayer, isPlayerReady } from './playerRegistry';
 
+const YT_HIDE_STYLE = (
+    <style>{`
+        .ytp-endscreen-container { display: none !important; }
+        .ytp-suggestions { display: none !important; }
+    `}</style>
+);
+
 const YouTubePlayer = ({ className, onReady, onStateChange, onEnded, muted = false, controls = true, quality = null, autoUnmute = false, passive = false }) => {
     const currentSong = useAppStore((s) => s.currentSong);
     const isPlaying = useAppStore((s) => s.isPlaying);
@@ -38,7 +45,6 @@ const YouTubePlayer = ({ className, onReady, onStateChange, onEnded, muted = fal
 
         const handleGlobalClick = () => {
             if (playerRef.current) {
-                console.log('[YouTubePlayer] Global click detected. Unmuting...');
                 playerRef.current.unMute();
                 playerRef.current.setVolume(100);
             }
@@ -67,7 +73,7 @@ const YouTubePlayer = ({ className, onReady, onStateChange, onEnded, muted = fal
 
         // Periodic enforcement (every 5s) to fight YouTube auto-quality
         if (window.ytQualityInterval) clearInterval(window.ytQualityInterval);
-        window.ytQualityInterval = setInterval(enforceQuality, 5000);
+        window.ytQualityInterval = setInterval(enforceQuality, 15000);
 
         justLoadedRef.current = true;
         setTimeout(() => { justLoadedRef.current = false; }, 1500);
@@ -80,19 +86,15 @@ const YouTubePlayer = ({ className, onReady, onStateChange, onEnded, muted = fal
             // TV mode: video starts muted via autoplay:1 + mute:1
             // Only unmute when Host sends PLAY (store.isPlaying=true)
             if (shouldPlay) {
-                console.log('[YouTubePlayer] TV _onReady: Store is playing → unmuting.');
                 event.target.unMute();
                 event.target.setVolume(100);
             } else {
-                console.log('[YouTubePlayer] TV _onReady: Waiting for PLAY → staying muted.');
                 event.target.mute();
                 event.target.setVolume(0);
             }
         } else if (shouldPlay) {
-            console.log('[YouTubePlayer] Host: Initial load playing.');
             event.target.playVideo();
         } else {
-            console.log('[YouTubePlayer] Host: Initial load paused.');
             event.target.mute();
             event.target.pauseVideo();
         }
@@ -122,15 +124,19 @@ const YouTubePlayer = ({ className, onReady, onStateChange, onEnded, muted = fal
             event.target.setPlaybackQuality(quality);
         }
 
-        // STRICT: While waiting for guest, NEVER allow playback audio
-        if (store.waitingForGuest && event.data === 1) {
-            if (passive) {
-                // TV: don't pause (autoplay:1 keeps video loaded), but ensure muted
-                event.target.mute();
-                event.target.setVolume(0);
-            } else {
-                event.target.pauseVideo();
-            }
+        // STRICT: TV must NEVER play unmuted unless Host explicitly sent PLAY
+        // This covers waitingForGuest AND the gap before it's set (during TTS)
+        if (passive && event.data === 1 && (!store.isPlaying || store.waitingForGuest)) {
+            event.target.mute();
+            event.target.setVolume(0);
+            // Also pause the video so it doesn't play visually during invitation
+            event.target.pauseVideo();
+            return;
+        }
+
+        // Host: block auto-play during waitingForGuest 
+        if (!passive && store.waitingForGuest && event.data === 1) {
+            event.target.pauseVideo();
             return;
         }
 
@@ -146,11 +152,9 @@ const YouTubePlayer = ({ className, onReady, onStateChange, onEnded, muted = fal
             // TV mode: unmute/mute based on store state
             if (event.data === 1) {
                 if (store.isPlaying && !store.waitingForGuest) {
-                    console.log('[YouTubePlayer] TV playing + store.isPlaying → unmuting.');
                     event.target.unMute();
                     event.target.setVolume(100);
                 } else {
-                    // Keep muted — video plays silently in background
                     event.target.mute();
                     event.target.setVolume(0);
                 }
@@ -202,14 +206,7 @@ const YouTubePlayer = ({ className, onReady, onStateChange, onEnded, muted = fal
 
     return (
         <div ref={containerRef} className={className} style={{ position: 'relative', overflow: 'hidden' }}>
-            <style>{`
-                .ytp-endscreen-container {
-                    display: none !important;
-                }
-                .ytp-suggestions {
-                    display: none !important;
-                }
-            `}</style>
+            {YT_HIDE_STYLE}
             <YouTube
                 videoId={currentSong.videoId}
                 opts={opts}

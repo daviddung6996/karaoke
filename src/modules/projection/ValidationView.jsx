@@ -20,6 +20,7 @@ class PlayerErrorBoundary extends React.Component {
 
     componentDidCatch(error) {
         console.warn('[TV] Player crashed, recovering...', error.message);
+        setTimeout(() => this.setState({ hasError: false }), 500);
     }
 
     componentDidUpdate(prevProps) {
@@ -31,11 +32,9 @@ class PlayerErrorBoundary extends React.Component {
 
     render() {
         if (this.state.hasError) {
-            // Auto-retry after short delay
-            setTimeout(() => this.setState({ hasError: false }), 500);
             return (
                 <div className="w-full h-full bg-black flex items-center justify-center">
-                    <div className="text-white/50 text-xl animate-pulse">Đang tải...</div>
+                    <div className="text-white/50 text-xl">Đang tải...</div>
                 </div>
             );
         }
@@ -173,18 +172,25 @@ const ValidationView = () => {
         setTimeout(trySmartFullscreen, 1000);
     }, []);
 
-    // Auto-hide controls after 3s, show on mouse move
+    // Auto-hide controls after 3s, show on mouse move (throttled)
     const resetHideTimer = useCallback(() => {
-        setControlsVisible(true);
         if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
         hideTimerRef.current = setTimeout(() => setControlsVisible(false), 3000);
     }, []);
 
+    const throttledMouseMove = useRef(null);
     useEffect(() => {
+        const onMove = () => {
+            if (throttledMouseMove.current) return;
+            throttledMouseMove.current = true;
+            setControlsVisible(true);
+            resetHideTimer();
+            setTimeout(() => { throttledMouseMove.current = false; }, 500);
+        };
         resetHideTimer();
-        window.addEventListener('mousemove', resetHideTimer);
+        window.addEventListener('mousemove', onMove);
         return () => {
-            window.removeEventListener('mousemove', resetHideTimer);
+            window.removeEventListener('mousemove', onMove);
             if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
         };
     }, [resetHideTimer]);
@@ -214,17 +220,19 @@ const ValidationView = () => {
                 </div>
             )}
 
-            {/* Background Keep-Alive Video (Always Rendered) */}
-            <div className="absolute inset-0 z-0 overflow-hidden">
-                <video
-                    src={bgVideo}
-                    autoPlay
-                    loop
-                    muted
-                    playsInline
-                    className={`w-full h-full object-cover transition-opacity duration-1000 ${currentSong && isPlaying ? 'opacity-0' : 'opacity-100'}`}
-                />
-            </div>
+            {/* Background Video — only mounted when visible to save GPU */}
+            {(!currentSong || !isPlaying) && (
+                <div className="absolute inset-0 z-0 overflow-hidden">
+                    <video
+                        src={bgVideo}
+                        autoPlay
+                        loop
+                        muted
+                        playsInline
+                        className="w-full h-full object-cover"
+                    />
+                </div>
+            )}
             <WaitingOverlay />
 
             {/* Fullscreen toggle — auto-hide after 3s */}

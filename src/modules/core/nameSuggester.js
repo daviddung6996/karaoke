@@ -1,153 +1,465 @@
 /**
  * Smart Name Suggester for Karaoke Guests
- * Converts shortcodes and provides tonal variations for Vietnamese typing.
+ * Uses a dictionary-based approach for accurate Vietnamese name suggestions.
  */
 
-const PREFIX_MAP = {
-    'a': 'Anh', 'anh': 'Anh',
-    'c': 'Chị', 'chi': 'Chị',
-    'e': 'Em', 'em': 'Em',
-    'co': 'Cô',
-    'ch': 'Chú', 'chu': 'Chú',
-    'b': 'Bạn', 'ban': 'Bàn'
+// Common Vietnamese name syllables map
+// Keys must be lowercase & unaccented
+const NAME_MAP = {
+    'a': ['A', 'Á', 'À', 'Ả', 'Ã', 'Ạ'],
+    'an': ['An', 'Án', 'Ân', 'Ấn', 'Ẩn'],
+    'anh': ['Anh', 'Ánh', 'Ảnh'],
+    'au': ['Âu', 'Ấu'],
+    'ba': ['Ba', 'Bà', 'Bá', 'Bả', 'Bạ'],
+    'bac': ['Bác', 'Bạc', 'Bắc'],
+    'bach': ['Bạch', 'Bách'],
+    'ban': ['Ban', 'Bản', 'Bạn', 'Bàn', 'Bán'],
+    'bang': ['Bang', 'Bàng', 'Bảng', 'Băng', 'Bằng'],
+    'bao': ['Bao', 'Bào', 'Báo', 'Bảo', 'Bão'],
+    'bay': ['Bay', 'Bày', 'Bảy', 'Bãy', 'Bạy'],
+    'be': ['Bé', 'Bê', 'Bề', 'Bể'],
+    'ben': ['Bến', 'Bền'],
+    'bi': ['Bi', 'Bí', 'Bỉ', 'Bị'],
+    'bia': ['Bia', 'Bìa'],
+    'bich': ['Bích'],
+    'bien': ['Biên', 'Biển', 'Biện'],
+    'binh': ['Binh', 'Bình', 'Bính'],
+    'bo': ['Bo', 'Bò', 'Bó', 'Bỏ', 'Bọ', 'Bố', 'Bộ', 'Bồ', 'Bổ'],
+    'boi': ['Bối', 'Bồi'],
+    'bon': ['Bốn', 'Bồn'],
+    'bong': ['Bong', 'Bóng', 'Bỏng', 'Bông', 'Bồng'],
+    'bu': ['Bu', 'Bú', 'Bù', 'Bủ'],
+    'bui': ['Bùi', 'Bụi'],
+    'buon': ['Buôn', 'Buồn'],
+    'buong': ['Buông', 'Buồng', 'Bương'],
+    'buoi': ['Bưởi'],
+    'ca': ['Ca', 'Cá', 'Cà', 'Cả'],
+    'cac': ['Các'],
+    'cai': ['Cai', 'Cái', 'Cải'],
+    'cam': ['Cam', 'Cám', 'Cảm', 'Cẩm'],
+    'can': ['Can', 'Cán', 'Cản', 'Cần', 'Cẩn', 'Cận'],
+    'canh': ['Canh', 'Cánh', 'Cảnh', 'Cạnh'],
+    'cao': ['Cao', 'Cáo', 'Cảo', 'Cạo'],
+    'cat': ['Cát', 'Cắt'],
+    'chi': ['Chi', 'Chí', 'Chỉ', 'Chị'],
+    'chien': ['Chiến', 'Chiện'],
+    'chinh': ['Chinh', 'Chính', 'Chỉnh'],
+    'chu': ['Chu', 'Chú', 'Chủ', 'Chữ', 'Châu', 'Chấu'],
+    'chung': ['Chung', 'Chúng', 'Chủng', 'Chứng'],
+    'chuong': ['Chương', 'Chướng', 'Chưởng'],
+    'co': ['Co', 'Có', 'Cò', 'Cỏ', 'Cô', 'Cố', 'Cổ', 'Cơ', 'Cờ', 'Cỡ'],
+    'cong': ['Cong', 'Cong', 'Cộng', 'Công', 'Cống', 'Cổng'],
+    'cu': ['Cu', 'Cú', 'Củ', 'Cụ', 'Cư', 'Cứ', 'Cử', 'Cự'],
+    'cuc': ['Cúc', 'Cục'],
+    'cuong': ['Cương', 'Cường', 'Cưỡng'],
+    'cuu': ['Cứu', 'Cựu', 'Cửu'],
+    'da': ['Da', 'Dạ', 'Đa', 'Đá', 'Đà', 'Đả'],
+    'dac': ['Đắc', 'Đặc'],
+    'dai': ['Dai', 'Dài', 'Đại', 'Đai'],
+    'dam': ['Đàm', 'Đạm', 'Đầm'],
+    'dan': ['Dan', 'Dân', 'Dần', 'Dẫn', 'Đan', 'Đàn', 'Đản'],
+    'dang': ['Dang', 'Dáng', 'Đang', 'Đáng', 'Đảng', 'Đăng', 'Đặng'],
+    'dao': ['Dao', 'Dào', 'Dạo', 'Đào', 'Đảo', 'Đạo'],
+    'dat': ['Đạt', 'Đất'],
+    'dau': ['Dâu', 'Dầu', 'Dấu', 'Đau', 'Đâu', 'Đấu', 'Đầu', 'Đậu'],
+    'de': ['Dế', 'Đê', 'Đế', 'Đệ'],
+    'di': ['Di', 'Dì', 'Dị', 'Đi'],
+    'diep': ['Diệp', 'Điệp'],
+    'dieu': ['Diêu', 'Diều', 'Diệu', 'Điêu', 'Điều', 'Điệu'],
+    'dinh': ['Dinh', 'Dính', 'Đinh', 'Đình', 'Đỉnh', 'Định'],
+    'do': ['Do', 'Dò', 'Đo', 'Đò', 'Đó', 'Đỏ', 'Đô', 'Đỗ', 'Độ'],
+    'doan': ['Doan', 'Đoan', 'Đoàn', 'Đoán'],
+    'doi': ['Đồi', 'Đổi', 'Đợi', 'Đời'],
+    'don': ['Đôn', 'Đồn', 'Đơn'],
+    'dong': ['Dong', 'Dòng', 'Đông', 'Đồng', 'Động'],
+    'du': ['Du', 'Dù', 'Dự', 'Dữ', 'Đu', 'Đủ', 'Đú', 'Dư'],
+    'duc': ['Dục', 'Đức'],
+    'dung': ['Dung', 'Dùng', 'Dũng', 'Dụng', 'Đừng'],
+    'duoc': ['Được'],
+    'duong': ['Dương', 'Dưỡng', 'Đường'],
+    'duy': ['Duy', 'Dụy'],
+    'duyen': ['Duyên'],
+    'gia': ['Gia', 'Giá', 'Giả'],
+    'giai': ['Giai', 'Giải'],
+    'giam': ['Giam', 'Giám', 'Giảm'],
+    'gian': ['Gian', 'Giàn', 'Gián', 'Giản'],
+    'giang': ['Giang', 'Giáng', 'Giảng'],
+    'giao': ['Giao', 'Giáo'],
+    'giap': ['Giáp'],
+    'giau': ['Giàu'],
+    'gio': ['Gio', 'Gió', 'Giỏ'],
+    'gioi': ['Giỏi', 'Giới'],
+    'giu': ['Giữ'],
+    'ha': ['Ha', 'Hà', 'Há', 'Hạ'],
+    'hai': ['Hai', 'Hài', 'Hải', 'Hại'],
+    'ham': ['Hàm'],
+    'han': ['Han', 'Hàn', 'Hạn', 'Hân', 'Hân', 'Hận'],
+    'hang': ['Hang', 'Hàng', 'Hạng', 'Hằng'],
+    'hanh': ['Hanh', 'Hành', 'Hạnh'],
+    'hao': ['Hao', 'Hào', 'Hảo', 'Hạo'],
+    'hat': ['Hát', 'Hạt'],
+    'hau': ['Hau', 'Hầu', 'Hậu'],
+    'hien': ['Hiên', 'Hiền', 'Hiển', 'Hiện', 'Hiến'],
+    'hieu': ['Hiêu', 'Hiều', 'Hiểu', 'Hiệu', 'Hiếu'],
+    'hinh': ['Hình'],
+    'hoa': ['Hoa', 'Hòa', 'Hóa', 'Hỏa', 'Họa'],
+    'hoai': ['Hoài'],
+    'hoan': ['Hoan', 'Hoàn', 'Hoán', 'Hoạn'],
+    'hoang': ['Hoang', 'Hoàng', 'Hoãng'],
+    'hoc': ['Học'],
+    'hoi': ['Hoi', 'Hòi', 'Hỏi', 'Hội', 'Hồi'],
+    'hop': ['Hộp', 'Hợp'],
+    'hue': ['Huế', 'Huệ'],
+    'hung': ['Hung', 'Hùng', 'Hưng', 'Hứng'],
+    'huy': ['Huy', 'Hủy'],
+    'huyen': ['Huyền', 'Huyện'],
+    'huynh': ['Huynh', 'Huỳnh'],
+    'huong': ['Hương', 'Hường', 'Hưởng', 'Hướng'],
+    'kha': ['Kha', 'Khá', 'Khả'],
+    'khai': ['Khai', 'Khải'],
+    'khanh': ['Khanh', 'Khánh'],
+    'khiem': ['Khiêm', 'Khiếm'],
+    'khoa': ['Khoa', 'Khóa'],
+    'khoi': ['Khôi', 'Khởi'],
+    'khuong': ['Khương'],
+    'khuyen': ['Khuyên', 'Khuyến'],
+    'kien': ['Kiên', 'Kiến', 'Kiện'],
+    'kieu': ['Kiều'],
+    'kim': ['Kim', 'Kìm'],
+    'kinh': ['Kinh', 'Kính'],
+    'ky': ['Ky', 'Kỳ', 'Kỷ', 'Kỹ', 'Ký'],
+    'lai': ['Lai', 'Lài', 'Lại', 'Lái'],
+    'lam': ['Lam', 'Làm', 'Lâm', 'Lầm'],
+    'lan': ['Lan', 'Làn', 'Lân', 'Lần'],
+    'lang': ['Lang', 'Làng', 'Lăng'],
+    'lanh': ['Lanh', 'Lành', 'Lãnh'],
+    'le': ['Le', 'Lê', 'Lễ', 'Lệ'],
+    'lien': ['Liên'],
+    'lieu': ['Liêu', 'Liều', 'Liễu', 'Liệu'],
+    'linh': ['Linh', 'Lĩnh', 'Lịnh'],
+    'loan': ['Loan', 'Loàn'],
+    'loc': ['Lộc', 'Lốc'],
+    'loi': ['Lợi', 'Lời', 'Lối'],
+    'long': ['Long', 'Lòng'],
+    'lua': ['Lúa', 'Lụa'],
+    'luan': ['Luân', 'Luận'],
+    'luat': ['Luật'],
+    'luc': ['Lục', 'Lực'],
+    'luong': ['Lương', 'Lượng'],
+    'luu': ['Lưu'],
+    'ly': ['Ly', 'Lý', 'Lỳ'],
+    'ma': ['Ma', 'Mà', 'Má', 'Mã', 'Mạ'],
+    'mai': ['Mai', 'Mài', 'Mái'],
+    'man': ['Mân', 'Mẫn', 'Mãn', 'Mặn'],
+    'manh': ['Manh', 'Mạnh'],
+    'mao': ['Mao', 'Mão', 'Mạo'],
+    'may': ['May', 'Máy', 'Mây'],
+    'me': ['Mê', 'Mễ', 'Mẹ'],
+    'men': ['Mến', 'Mền'],
+    'mi': ['Mi', 'Mì', 'Mĩ', 'Mị', 'Mỹ'],
+    'mien': ['Miên', 'Miền', 'Miến'],
+    'minh': ['Minh', 'Mình'],
+    'mo': ['Mơ', 'Mở', 'Mỡ', 'Mợ'],
+    'moc': ['Mộc', 'Mốc'],
+    'moi': ['Mới', 'Mời', 'Môi', 'Mỗi'],
+    'mong': ['Mong', 'Mỏng', 'Mộng'],
+    'mu': ['Mu', 'Mù', 'Mũ'],
+    'mua': ['Mua', 'Mùa', 'Mưa'],
+    'muc': ['Mục', 'Mực'],
+    'mui': ['Mùi', 'Mũi'],
+    'my': ['My', 'Mỹ', 'Mỵ'],
+    'na': ['Na', 'Nả'],
+    'nam': ['Nam', 'Năm', 'Nắm', 'Nằm'],
+    'nan': ['Nan', 'Nạn'],
+    'nang': ['Nang', 'Nàng', 'Nặng', 'Nắng'],
+    'nga': ['Nga', 'Ngà', 'Ngã'],
+    'ngai': ['Ngại', 'Ngãi'],
+    'ngan': ['Ngân', 'Ngần', 'Ngạn', 'Ngắn'],
+    'nghi': ['Nghi', 'Nghỉ', 'Nghĩ', 'Nghị'],
+    'nghia': ['Nghĩa'],
+    'nghiep': ['Nghiệp'],
+    'ngoc': ['Ngọc'],
+    'ngu': ['Ngư', 'Ngự', 'Ngủ', 'Ngụ'],
+    'nguyen': ['Nguyên', 'Nguyễn', 'Nguyện'],
+    'nguyet': ['Nguyệt'],
+    'nhan': ['Nhan', 'Nhàn', 'Nhân', 'Nhẫn', 'Nhận'],
+    'nhat': ['Nhật', 'Nhất'],
+    'nhi': ['Nhi', 'Nhĩ', 'Nhị', 'Nhí'],
+    'nhien': ['Nhiên'],
+    'nhieu': ['Nhiều'],
+    'nho': ['Nho', 'Nhỏ', 'Nhớ', 'Nhờ'],
+    'nhu': ['Nhu', 'Như', 'Như'],
+    'nhung': ['Nhung', 'Những'],
+    'ni': ['Ni', 'Nỉ'],
+    'nien': ['Niên'],
+    'ninh': ['Ninh'],
+    'no': ['No', 'Nô', 'Nỗ', 'Nợ', 'Nở'],
+    'noi': ['Nôi', 'Nổi', 'Nội', 'Nói', 'Nơi'],
+    'nu': ['Nu', 'Nụ', 'Nữ'],
+    'nuong': ['Nương'],
+    'o': ['O', 'Ó', 'Ò', 'Ỏ', 'Õ', 'Ọ', 'Ô', 'Ố', 'Ồ', 'Ổ', 'Ơ', 'Ớ', 'Ờ', 'Ở'],
+    'oa': ['Oa'],
+    'oanh': ['Oanh'],
+    'on': ['Ôn', 'Ổn', 'Ơn'],
+    'ong': ['Ong', 'Ông'],
+    'pa': ['Pa'],
+    'pham': ['Phạm', 'Phẩm'],
+    'phan': ['Phan', 'Phản', 'Phần', 'Phấn', 'Phận'],
+    'phat': ['Phát', 'Phật'],
+    'phi': ['Phi', 'Phí', 'Phỉ'],
+    'phong': ['Phong', 'Phóng', 'Phòng', 'Phỏng'],
+    'phu': ['Phu', 'Phù', 'Phú', 'Phủ', 'Phụ'],
+    'phuc': ['Phúc', 'Phục'],
+    'phung': ['Phung', 'Phùng', 'Phụng'],
+    'phuoc': ['Phước'],
+    'phuong': ['Phương', 'Phượng', 'Phường'],
+    'qua': ['Qua', 'Quà', 'Quá', 'Quả'],
+    'quan': ['Quan', 'Quân', 'Quán', 'Quản', 'Quận', 'Quần'],
+    'quang': ['Quang', 'Quảng'],
+    'que': ['Quê', 'Quế'],
+    'quoc': ['Quốc'],
+    'quy': ['Quy', 'Quý', 'Quỳ', 'Quỷ', 'Quỹ'],
+    'quyen': ['Quyên', 'Quyền', 'Quyến'],
+    'quynh': ['Quỳnh'],
+    'ra': ['Ra', 'Rà'],
+    'rang': ['Rang', 'Rạng', 'Răng', 'Rằng'],
+    'ri': ['Ri', 'Rỉ'],
+    'ro': ['Rô', 'Rổ', 'Rõ'],
+    'roi': ['Roi', 'Rối', 'Rồi'],
+    'rom': ['Rơm'],
+    'ru': ['Ru', 'Rủ', 'Rũ'],
+    'run': ['Run'],
+    'rung': ['Rung', 'Rừng'],
+    'ruot': ['Ruột'],
+    'sa': ['Sa', 'Sả'],
+    'sac': ['Sắc'],
+    'sai': ['Sai', 'Sài'],
+    'sam': ['Sam', 'Sâm', 'Sấm'],
+    'san': ['San', 'Sàn', 'Sản', 'Sân'],
+    'sang': ['Sang', 'Sáng', 'Sàng', 'Sảng'],
+    'sanh': ['Sanh', 'Sành', 'Sảnh'],
+    'sao': ['Sao', 'Sáo'],
+    'sat': ['Sát', 'Sắt'],
+    'sau': ['Sau', 'Sáu', 'Sầu', 'Sâu', 'Sấu'],
+    'se': ['Se', 'Sẻ', 'Sẽ'],
+    'sen': ['Sen'],
+    'seo': ['Séo', 'Sẹo'],
+    'si': ['Si', 'Sĩ'],
+    'sinh': ['Sinh'],
+    'so': ['So', 'Sò', 'Số', 'Sổ', 'Sơ', 'Sờ', 'Sợ'],
+    'soc': ['Sóc'],
+    'soi': ['Soi', 'Sói', 'Sỏi'],
+    'son': ['Son', 'Sơn'],
+    'song': ['Song', 'Sóng', 'Sống', 'Sông'],
+    'su': ['Su', 'Susu', 'Sư', 'Sứ', 'Sử', 'Sự'],
+    'sua': ['Sua', 'Sửa', 'Sữa'],
+    'suc': ['Súc', 'Sức'],
+    'sung': ['Sung', 'Súng', 'Sừng'],
+    'suoi': ['Suối'],
+    'suong': ['Sương', 'Sướng'],
+    'sy': ['Sy', 'Sỹ'],
+    'ta': ['Ta', 'Tà', 'Tá', 'Tả', 'Tạ'],
+    'tac': ['Tác', 'Tạc', 'Tắc'],
+    'tai': ['Tai', 'Tài', 'Tái', 'Tại'],
+    'tam': ['Tam', 'Tám', 'Tàm', 'Tâm', 'Tầm', 'Tắm', 'Tẩm', 'Tạm'],
+    'tan': ['Tan', 'Tàn', 'Tán', 'Tản', 'Tân', 'Tấn', 'Tần', 'Tận'],
+    'tang': ['Tang', 'Tàng', 'Táng', 'Tảng', 'Tăng', 'Tặng', 'Tầng'],
+    'tao': ['Tao', 'Tào', 'Táo', 'Tảo', 'Tạo'],
+    'tap': ['Tạp', 'Tập'],
+    'tat': ['Tát', 'Tắt', 'Tật'],
+    'tay': ['Tay', 'Tây', 'Tẩy'],
+    'te': ['Te', 'Tê', 'Tế', 'Tệ'],
+    'ten': ['Ten', 'Tên'],
+    'teo': ['Teo', 'Tèo'],
+    'tet': ['Tết'],
+    'tha': ['Tha', 'Thà', 'Thả'],
+    'thac': ['Thác'],
+    'thai': ['Thai', 'Thái', 'Thải'],
+    'tham': ['Tham', 'Thám', 'Thảm', 'Thâm', 'Thẩm', 'Thấm'],
+    'than': ['Than', 'Thân', 'Thần', 'Thận'],
+    'thang': ['Thang', 'Tháng', 'Thắng', 'Thằng', 'Thẳng'],
+    'thanh': ['Thanh', 'Thành', 'Thánh', 'Thạnh', 'Thảnh'],
+    'thao': ['Thao', 'Thảo', 'Tháo'],
+    'that': ['Thất', 'Thật'],
+    'the': ['The', 'Thế', 'Thể', 'Thê', 'Thề', 'Thẻ'],
+    'them': ['Thêm', 'Thèm'],
+    'theo': ['Theo', 'Thèo'],
+    'thi': ['Thi', 'Thí', 'Thì', 'Thị', 'Thỉ'],
+    'thien': ['Thiên', 'Thiền', 'Thiện'],
+    'thiep': ['Thiếp', 'Thiệp'],
+    'thieu': ['Thiêu', 'Thiều', 'Thiếu', 'Thiệu'],
+    'thinh': ['Thinh', 'Thính', 'Thình', 'Thịnh', 'Thỉnh'],
+    'tho': ['Tho', 'Thỏ', 'Thọ', 'Thơ', 'Thờ', 'Thợ', 'Thô', 'Thổ'],
+    'thoa': ['Thoa', 'Thỏa'],
+    'thoai': ['Thoại', 'Thoải'],
+    'thom': ['Thơm'],
+    'thon': ['Thon', 'Thôn'],
+    'thong': ['Thong', 'Thông', 'Thống', 'Thồng'],
+    'thu': ['Thu', 'Thù', 'Thú', 'Thủ', 'Thụ', 'Thư', 'Thứ', 'Thử', 'Thự'],
+    'thua': ['Thua', 'Thừa'],
+    'thuan': ['Thuân', 'Thuần', 'Thuận'],
+    'thuc': ['Thúc', 'Thục', 'Thực', 'Thức'],
+    'thui': ['Thui', 'Thúi'],
+    'thuy': ['Thuy', 'Thùy', 'Thúy', 'Thủy', 'Thụy'],
+    'thuyen': ['Thuyên', 'Thuyền'],
+    'thuong': ['Thương', 'Thường', 'Thưởng', 'Thượng'],
+    'ti': ['Ti', 'Tí', 'Tì', 'Tỉ', 'Tị'],
+    'tien': ['Tiên', 'Tiền', 'Tiến', 'Tiễn', 'Tiện'],
+    'tiep': ['Tiếp', 'Tiệp'],
+    'tieu': ['Tiêu', 'Tiều', 'Tiểu'],
+    'tim': ['Tim', 'Tìm', 'Tím'],
+    'tin': ['Tin', 'Tín'],
+    'tinh': ['Tinh', 'Tinh', 'Tình', 'Tính', 'Tỉnh', 'Tịnh'],
+    'to': ['To', 'Tò', 'Tó', 'Tỏ', 'Tô', 'Tố', 'Tồ', 'Tổ', 'Tơ', 'Tờ', 'Tớ'],
+    'toa': ['Toa', 'Tòa', 'Tóa', 'Tỏa', 'Tọa'],
+    'toai': ['Toại'],
+    'toan': ['Toan', 'Toàn', 'Toán'],
+    'toc': ['Tóc', 'Tộc'],
+    'toi': ['Tôi', 'Tối', 'Tồi', 'Tội', 'Tới'],
+    'tom': ['Tôm'],
+    'ton': ['Ton', 'Tôn', 'Tồn', 'Tốn'],
+    'tong': ['Tong', 'Tông', 'Tòng', 'Tổng', 'Tống'],
+    'tot': ['Tốt'],
+    'tra': ['Tra', 'Trà', 'Trả'],
+    'trac': ['Trác', 'Trạc'],
+    'trai': ['Trai', 'Trái', 'Trải', 'Trại'],
+    'tram': ['Tram', 'Trám', 'Tràm', 'Trâm', 'Trầm'],
+    'tran': ['Tran', 'Trán', 'Tràn', 'Trân', 'Trần', 'Trận'],
+    'trang': ['Trang', 'Tráng', 'Tràng', 'Trạng', 'Trắng'],
+    'tranh': ['Tranh', 'Tránh'],
+    ' trao': ['Trao', 'Trào'],
+    'tre': ['Tre', 'Trẻ', 'Trễ'],
+    'tri': ['Tri', 'Trí', 'Trì', 'Trị'],
+    'trieu': ['Triêu', 'Triều', 'Triệu'],
+    'trinh': ['Trinh', 'Trình', 'Trịnh'],
+    'tro': ['Tro', 'Trò', 'Trỏ', 'Trọ', 'Trở', 'Trợ'],
+    'trong': ['Trong', 'Tròng', 'Trọng', 'Trông', 'Trồng', 'Trống'],
+    'tru': ['Tru', 'Trù', 'Trú', 'Trụ', 'Trữ', 'Trừ'],
+    'truc': ['Trúc', 'Trục', 'Trực'],
+    'trung': ['Trung', 'Trùng', 'Trúng', 'Trứng'],
+    'truong': ['Trương', 'Trường', 'Trưởng'],
+    'truyen': ['Chuyên', 'Truyền', 'Truyện'],
+    'tu': ['Tu', 'Tú', 'Tù', 'Tủ', 'Tụ', 'Tư', 'Tứ', 'Từ', 'Tử', 'Tự'],
+    'tuan': ['Tuân', 'Tuần', 'Tuấn'],
+    'tue': ['Tuệ'],
+    'tung': ['Tung', 'Tùng', 'Túng', 'Từng'],
+    'tuyen': ['Tuyên', 'Tuyền', 'Tuyển', 'Tuyệt'],
+    'tuyet': ['Tuyết', 'Tuyệt'],
+    'ty': ['Ty', 'Tý', 'Tỷ', 'Tỵ'],
+    'u': ['U', 'Ú', 'Ù', 'Ủ', 'Ụ', 'Ư', 'Ứ', 'Ừ', 'Ử', 'Ự'],
+    'uan': ['Uẩn'],
+    'uc': ['Úc', 'Ức'],
+    'uoc': ['Ước'],
+    'uy': ['Uy', 'Úy', 'Ủy'],
+    'uyen': ['Uyên', 'Uyển'],
+    'va': ['Va', 'Và', 'Vá', 'Vả'],
+    'vai': ['Vai', 'Vài', 'Vải'],
+    'van': ['Van', 'Vàn', 'Văn', 'Vằn', 'Vân', 'Vận', 'Vẫn', 'Vấn'],
+    'vang': ['Vang', 'Vàng', 'Vảng', 'Vâng'],
+    'vao': ['Vào'],
+    'vat': ['Vát', 'Vật'],
+    'vay': ['Vay', 'Vảy', 'Váy', 'Vậy', 'Vẫy'],
+    've': ['Ve', 'Vẻ', 'Vẽ', 'Vè', 'Về', 'Vệ'],
+    'len': ['Lên', 'Lèn'],
+    'vi': ['Vi', 'Ví', 'Vì', 'Vĩ', 'Vị'],
+    'vien': ['Viên', 'Viền', 'Viễn', 'Viện'],
+    'viet': ['Việt', 'Viết'],
+    'vinh': ['Vinh', 'Vĩnh', 'Vịnh'],
+    'vit': ['Vịt'],
+    'vo': ['Vo', 'Vò', 'Vó', 'Vỏ', 'Vô', 'Vỗ', 'Vợ', 'Vỡ'],
+    'voi': ['Voi', 'Vói', 'Vòi', 'Vội', 'Với'],
+    'vong': ['Vong', 'Vòng', 'Võng', 'Vọng'],
+    'vu': ['Vu', 'Vú', 'Vù', 'Vũ', 'Vụ'],
+    'vui': ['Vui'],
+    'vuong': ['Vương', 'Vượng', 'Vướng'],
+    'vuon': ['Vườn'],
+    'vy': ['Vy', 'Vỹ', 'Vý'],
+    'xa': ['Xa', 'Xá', 'Xả', 'Xạ'],
+    'xac': ['Xác'],
+    'xanh': ['Xanh'],
+    'xam': ['Xám', 'Xăm'],
+    'xan': ['Xà'],
+    'xau': ['Xâu', 'Xấu'],
+    'xe': ['Xe', 'Xé'],
+    'xem': ['Xem'],
+    'xen': ['Xen'],
+    'xeo': ['Xéo', 'Xèo'],
+    'xi': ['Xi', 'Xí', 'Xỉ'],
+    'xin': ['Xin', 'Xịn'],
+    'xinh': ['Xinh'],
+    'xo': ['Xo', 'Xô', 'Xổ'],
+    'xoa': ['Xoa', 'Xóa'],
+    'xoai': ['Xoài'],
+    'xom': ['Xóm'],
+    'xon': ['Xôn'],
+    'xu': ['Xu', 'Xù', 'Xú'],
+    'xuan': ['Xuân'],
+    'xuc': ['Xúc'],
+    'xue': ['Xuê'],
+    'xui': ['Xui'],
+    'xung': ['Xung'],
+    'xuy': ['Xùy'],
+    'xuyen': ['Xuyên', 'Xuyến'],
+    'y': ['Y', 'Ý', 'Ỳ', 'Ỷ', 'Y'],
+    'yen': ['Yên', 'Yến'],
+    'yeu': ['Yêu', 'Yếu'],
 };
 
-const NUMBER_MAP = {
-    '0': 'Không', '1': 'Một', '2': 'Hai', '3': 'Ba', '4': 'Bốn',
-    '5': 'Năm', '6': 'Sáu', '7': 'Bảy', '8': 'Tám', '9': 'Chín', '10': 'Mười'
-};
+// Helper: Normalize input
+function removeAccents(str) {
+    return str.normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd')
+        .replace(/Đ/g, 'D')
+        .toLowerCase();
+}
 
-const VIETNAMESE_VOWELS = {
-    'a': ['a', 'á', 'à', 'ả', 'ã', 'ạ'],
-    'ă': ['ă', 'ắ', 'ằ', 'ẳ', 'ẵ', 'ặ'],
-    'â': ['â', 'ấ', 'ầ', 'ẩ', 'ẫ', 'ậ'],
-    'e': ['e', 'é', 'è', 'ẻ', 'ẽ', 'ẹ'],
-    'ê': ['ê', 'ế', 'ề', 'ể', 'ễ', 'ệ'],
-    'i': ['i', 'í', 'ì', 'ỉ', 'ĩ', 'ị'],
-    'o': ['o', 'ó', 'ò', 'ỏ', 'õ', 'ọ'],
-    'ô': ['ô', 'ố', 'ồ', 'ổ', 'ỗ', 'ộ'],
-    'ơ': ['ơ', 'ớ', 'ờ', 'ở', 'ỡ', 'ợ'],
-    'u': ['u', 'ú', 'ù', 'ủ', 'ũ', 'ụ'],
-    'ư': ['ư', 'ứ', 'ừ', 'ử', 'ữ', 'ự'],
-    'y': ['y', 'ý', 'ỳ', 'ỷ', 'ỹ', 'ỵ'],
-};
+// Capitalize first letter
+function capitalize(str) {
+    if (!str) return '';
+    return str.charAt(0).toUpperCase() + str.slice(1);
+}
 
-// Common variations to prioritize
-const PRIORITY_MAP = {
-    'bay': 'Bảy',
-    'tam': 'Tám',
-    'chin': 'Chín',
-    'muoi': 'Mười',
-    'hai': 'Hải',
-    'sau': 'Sáu',
-    'nam': 'Năm',
-    'bon': 'Bốn'
-};
+// Generate permutations
+function generatePermutations(words) {
+    if (words.length === 0) return [];
 
-// Vowel mutations for unaccented typing
-const VOWEL_MUTATIONS = {
-    'a': ['a', 'ă', 'â'],
-    'e': ['e', 'ê'],
-    'o': ['o', 'ô', 'ơ'],
-    'u': ['u', 'ư'],
-    'i': ['i'],
-    'y': ['y']
-};
+    // Map each word to its variants
+    const pools = words.map(word => {
+        const variants = NAME_MAP[word];
+        return variants ? variants : [capitalize(word)]; // Fallback
+    });
 
-function getTonalVariations(word) {
-    // 1. Check exact number map
-    if (NUMBER_MAP[word]) return [NUMBER_MAP[word]];
-
-    // 2. Check priority map
-    if (PRIORITY_MAP[word]) {
-        // We can return here or prioritize it.
-        // Let's generate variations but put priority first.
-        // Only return if exact match? No, we want variations too.
-    }
-
-    let variations = new Set();
-    const chars = word.split('');
-
-    // Find the primary vowel (nucleus) to mutate
-    // Strategy: Find the LAST vowel in the word.
-    let vowelIdx = -1;
-    let baseChar = '';
-
-    for (let i = chars.length - 1; i >= 0; i--) {
-        if (VOWEL_MUTATIONS[chars[i]]) {
-            vowelIdx = i;
-            baseChar = chars[i];
-            break;
-        }
-    }
-
-    if (vowelIdx !== -1) {
-        // Get all base forms (e.g., 'e' -> 'e', 'ê')
-        const baseForms = VOWEL_MUTATIONS[baseChar] || [baseChar];
-
-        baseForms.forEach(form => {
-            // For each form, get tonal variations (e.g., 'ê' -> 'ế', 'ề'...)
-            const tones = VIETNAMESE_VOWELS[form];
-            if (tones) {
-                tones.forEach(toneChar => {
-                    let newChars = [...chars];
-                    newChars[vowelIdx] = toneChar;
-                    variations.add(newChars.join(''));
-                });
-            } else {
-                // If no tones map (shouldn't happen if config is right), keep base
-                let newChars = [...chars];
-                newChars[vowelIdx] = form;
-                variations.add(newChars.join(''));
-            }
+    // Cartesian product
+    const results = pools.reduce((acc, curr) => {
+        const next = [];
+        acc.forEach(prefix => {
+            curr.forEach(suffix => {
+                next.push(prefix ? `${prefix} ${suffix}` : suffix);
+            });
         });
-    } else {
-        variations.add(word);
-    }
+        return next;
+    }, ['']); // Start with empty prefix
 
-    // Convert Set to Array and Capitalize
-    let result = Array.from(variations).map(v => v.charAt(0).toUpperCase() + v.slice(1));
-
-    // Sort? Maybe prioritized by commonality if we had data.
-    // Length sort or alpha sort. Alpha is fine.
-    return result;
+    return results;
 }
 
 export const suggestNames = (input) => {
-    if (!input || !input.trim()) return [];
+    if (!input || input.trim().length === 0) return [];
 
-    const parts = input.toLowerCase().trim().split(/\s+/);
-    const lastPart = parts[parts.length - 1]; // The word currently being typed/modified
-    const prefixParts = parts.slice(0, parts.length - 1);
+    const normalizedInput = removeAccents(input.trim());
+    const words = normalizedInput.split(/\s+/);
 
-    let prefixStr = '';
+    // Limit word count to prevent explosion
+    if (words.length > 5) return [];
 
-    // Process prefixes
-    const processedPrefixes = prefixParts.map((p, idx) => {
-        if (idx === 0 && PREFIX_MAP[p]) return PREFIX_MAP[p];
-        return p.charAt(0).toUpperCase() + p.slice(1);
-    });
+    let perms = generatePermutations(words);
 
-    prefixStr = processedPrefixes.join(' ');
+    // Prioritize exact input
+    const exactInput = input.trim();
+    perms = perms.filter(p => p.toLowerCase() !== exactInput.toLowerCase());
+    perms.unshift(exactInput);
 
-    // Generate variations for the last part
-    let variations = getTonalVariations(lastPart);
-
-    // Enhance with priority map if applicable
-    if (PRIORITY_MAP[lastPart]) {
-        const priority = PRIORITY_MAP[lastPart];
-        // Move priority to front
-        variations = variations.filter(v => v !== priority);
-        variations.unshift(priority);
-    }
-
-    // Also check Number Map for the last part if it's a digit
-    if (NUMBER_MAP[lastPart]) {
-        const numVal = NUMBER_MAP[lastPart];
-        variations = variations.filter(v => v !== numVal);
-        variations.unshift(numVal);
-    }
-
-    // Combine
-    return variations.map(v => (prefixStr ? `${prefixStr} ${v}` : v));
+    // Limit to reasonable number
+    return perms.slice(0, 15);
 };

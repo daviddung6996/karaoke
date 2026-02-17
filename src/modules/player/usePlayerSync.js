@@ -18,12 +18,16 @@ export const usePlayerSync = (role = 'host', { onSongEnded } = {}) => {
     const isPlaying = useAppStore((s) => s.isPlaying);
     const waitingForGuest = useAppStore((s) => s.waitingForGuest);
     const waitCountdown = useAppStore((s) => s.waitCountdown);
+    const countdownPaused = useAppStore((s) => s.countdownPaused);
+    const micAttemptHint = useAppStore((s) => s.micAttemptHint);
     const restartTrigger = useAppStore((s) => s.restartTrigger);
     const queue = useAppStore((s) => s.queue);
     const setCurrentSong = useAppStore((s) => s.setCurrentSong);
     const setIsPlaying = useAppStore((s) => s.setIsPlaying);
     const setWaitingForGuest = useAppStore((s) => s.setWaitingForGuest);
     const setWaitCountdown = useAppStore((s) => s.setWaitCountdown);
+    const setCountdownPaused = useAppStore((s) => s.setCountdownPaused);
+    const setMicAttemptHint = useAppStore((s) => s.setMicAttemptHint);
     const triggerRestart = useAppStore((s) => s.triggerRestart);
 
     const channelRef = useRef(null);
@@ -74,8 +78,6 @@ export const usePlayerSync = (role = 'host', { onSongEnded } = {}) => {
                 }
 
                 case 'PLAY': {
-                    console.log('[Sync] Received PLAY → unmuting TV');
-
                     if (stopAutoplayRef.current) {
                         clearInterval(stopAutoplayRef.current);
                         stopAutoplayRef.current = null;
@@ -91,7 +93,6 @@ export const usePlayerSync = (role = 'host', { onSongEnded } = {}) => {
                     if (isPlayerReady()) {
                         doUnmute();
                     } else {
-                        console.log('[Sync] Player not ready. Waiting to unmute...');
                         const waitForReady = setInterval(() => {
                             if (isPlayerReady()) {
                                 clearInterval(waitForReady);
@@ -104,7 +105,6 @@ export const usePlayerSync = (role = 'host', { onSongEnded } = {}) => {
                 }
 
                 case 'PAUSE': {
-                    console.log('[Sync] Received PAUSE → muting TV');
                     setIsPlaying(false);
                     if (isPlayerReady()) mutePlayer();
                     break;
@@ -116,6 +116,14 @@ export const usePlayerSync = (role = 'host', { onSongEnded } = {}) => {
 
                 case 'COUNTDOWN':
                     setWaitCountdown(payload);
+                    break;
+
+                case 'COUNTDOWN_PAUSED':
+                    setCountdownPaused(payload);
+                    break;
+
+                case 'MIC_ATTEMPT':
+                    setMicAttemptHint(payload);
                     break;
 
                 case 'RESTART': {
@@ -142,7 +150,7 @@ export const usePlayerSync = (role = 'host', { onSongEnded } = {}) => {
                     break;
 
                 case 'FULL_SYNC': {
-                    const { song, playing, waiting, countdown, queue: syncQueue } = payload;
+                    const { song, playing, waiting, countdown, paused, micHint, queue: syncQueue } = payload;
 
                     if (stopAutoplayRef.current) {
                         clearInterval(stopAutoplayRef.current);
@@ -167,6 +175,8 @@ export const usePlayerSync = (role = 'host', { onSongEnded } = {}) => {
                     }
                     setWaitingForGuest(waiting);
                     setWaitCountdown(countdown);
+                    setCountdownPaused(paused || false);
+                    setMicAttemptHint(micHint || null);
                     if (syncQueue) useAppStore.getState().reorderQueue(syncQueue);
                     break;
                 }
@@ -191,7 +201,7 @@ export const usePlayerSync = (role = 'host', { onSongEnded } = {}) => {
             channel.close();
             channelRef.current = null;
         };
-    }, [role, getChannel, setCurrentSong, setIsPlaying, setWaitingForGuest, setWaitCountdown, triggerRestart, sendMessage]);
+    }, [role, getChannel, setCurrentSong, setIsPlaying, setWaitingForGuest, setWaitCountdown, setCountdownPaused, setMicAttemptHint, triggerRestart, sendMessage]);
 
     // ========== HOST ROLE ==========
 
@@ -210,6 +220,8 @@ export const usePlayerSync = (role = 'host', { onSongEnded } = {}) => {
                     playing: store.isPlaying,
                     waiting: store.waitingForGuest,
                     countdown: store.waitCountdown,
+                    paused: store.countdownPaused,
+                    micHint: store.micAttemptHint,
                     queue: store.queue,
                 });
             } else if (type === 'SYNC_TIME') {
@@ -284,6 +296,18 @@ export const usePlayerSync = (role = 'host', { onSongEnded } = {}) => {
         if (role !== 'host') return;
         sendMessage('COUNTDOWN', waitCountdown);
     }, [role, waitCountdown, sendMessage]);
+
+    // Send countdownPaused
+    useEffect(() => {
+        if (role !== 'host') return;
+        sendMessage('COUNTDOWN_PAUSED', countdownPaused);
+    }, [role, countdownPaused, sendMessage]);
+
+    // Send micAttemptHint
+    useEffect(() => {
+        if (role !== 'host') return;
+        sendMessage('MIC_ATTEMPT', micAttemptHint);
+    }, [role, micAttemptHint, sendMessage]);
 
     // Send restart
     useEffect(() => {

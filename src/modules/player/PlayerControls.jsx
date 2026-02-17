@@ -1,16 +1,19 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAppStore } from '../core/store';
 import { getPlayerTime, getDuration } from './playerRegistry';
 import { Volume2, VolumeX, Volume1 } from 'lucide-react';
 
 const CHANNEL_NAME = 'karaoke_sync_channel';
 
+let _tvChannel = null;
+const getTVChannel = () => {
+    if (!_tvChannel) _tvChannel = new BroadcastChannel(CHANNEL_NAME);
+    return _tvChannel;
+};
 const sendToTV = (type, payload) => {
     try {
-        const ch = new BroadcastChannel(CHANNEL_NAME);
-        ch.postMessage({ type, payload });
-        ch.close();
-    } catch { }
+        getTVChannel().postMessage({ type, payload });
+    } catch { _tvChannel = null; }
 };
 
 const formatTime = (seconds) => {
@@ -21,14 +24,14 @@ const formatTime = (seconds) => {
 };
 
 const PlayerControls = () => {
-    const { currentSong, restartTrigger } = useAppStore();
+    const currentSong = useAppStore((s) => s.currentSong);
+    const restartTrigger = useAppStore((s) => s.restartTrigger);
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
     const [volume, setVolumeState] = useState(100);
     const [isMuted, setIsMuted] = useState(false);
     const isRestartingRef = useRef(false);
     const prevVolumeRef = useRef(100);
-    const rafRef = useRef(null);
 
     // Snap to 0 when restart triggered
     useEffect(() => {
@@ -39,21 +42,25 @@ const PlayerControls = () => {
         }
     }, [restartTrigger]);
 
-    // Tick: read remote time from TV (read-only display)
-    const tick = useCallback(() => {
-        if (!isRestartingRef.current) {
-            setCurrentTime(getPlayerTime());
-        }
-        setDuration(getDuration());
-        rafRef.current = requestAnimationFrame(tick);
-    }, []);
-
+    // Tick: poll time at 1fps (sufficient for progress bar)
     useEffect(() => {
-        rafRef.current = requestAnimationFrame(tick);
-        return () => {
-            if (rafRef.current) cancelAnimationFrame(rafRef.current);
-        };
-    }, [tick]);
+        if (!currentSong) return;
+        const interval = setInterval(() => {
+            if (!isRestartingRef.current) {
+                const t = getPlayerTime();
+                const d = getDuration();
+                setCurrentTime(prev => {
+                    const rounded = Math.floor(t);
+                    return Math.floor(prev) === rounded ? prev : rounded;
+                });
+                setDuration(prev => {
+                    const rounded = Math.floor(d);
+                    return Math.floor(prev) === rounded ? prev : rounded;
+                });
+            }
+        }, 1000);
+        return () => clearInterval(interval);
+    }, [currentSong]);
 
     // Volume
     const handleVolumeChange = (e) => {

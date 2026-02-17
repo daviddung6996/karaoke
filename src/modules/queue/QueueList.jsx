@@ -28,8 +28,10 @@ const QueueItem = ({ item, index, onRemove, onPlay, onInvite, isFirst, queueMode
                         <GripVertical size={16} />
                     </div>
                     <div className="flex-1 min-w-0">
-                        <h3 className="font-black text-slate-800 text-sm leading-relaxed truncate uppercase tracking-tight" title={item.title} style={{ textDecoration: 'none', borderBottom: 'none', paddingBottom: '2px' }}>{item.title || 'Không có tiêu đề'}</h3>
-                        <span className="text-xs font-black text-slate-500 bg-slate-100 px-2 py-1 rounded-md uppercase tracking-wide">{item.addedBy}</span>
+                        <h3 className="font-bold text-slate-800 text-sm leading-snug truncate uppercase tracking-tight" title={item.title}>{item.title || 'Không có tiêu đề'}</h3>
+                        <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 uppercase tracking-wider">{item.addedBy}</span>
+                        </div>
                     </div>
 
                     <button
@@ -123,11 +125,11 @@ const QueueList = ({ onReAnnounce }) => {
                             </div>
 
                             <Card className="p-3 bg-indigo-600 border-0 relative rounded-xl text-white shadow-sm overflow-hidden">
-                                <div className="absolute top-0 right-0 w-20 h-20 bg-white/10 rounded-full -mr-10 -mt-10 blur-xl"></div>
+                                <div className="absolute top-0 right-0 w-20 h-20 bg-white/10 rounded-full -mr-10 -mt-10"></div>
 
                                 <div className="flex items-center gap-3 relative z-10">
                                     {/* Animated Icon */}
-                                    <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 backdrop-blur-md shadow-inner border border-white/10">
+                                    <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 border border-white/10">
                                         <div className="flex gap-0.5 items-end h-3">
                                             <div className="w-0.5 bg-white animate-[bounce_1s_infinite] h-1.5"></div>
                                             <div className="w-0.5 bg-white animate-[bounce_1.2s_infinite] h-3"></div>
@@ -141,7 +143,7 @@ const QueueList = ({ onReAnnounce }) => {
                                         <div className="flex items-center text-[10px] text-indigo-100 gap-1.5">
                                             <span className="truncate max-w-[80px] opacity-80" style={{ display: 'none' }}>{currentSong.artist}</span>
                                             <span className="w-0.5 h-0.5 rounded-full bg-white/50 shrink-0" style={{ display: 'none' }}></span>
-                                            <div className="flex items-center gap-1 bg-white/20 px-1.5 py-0.5 rounded-md backdrop-blur-sm border border-white/10">
+                                            <div className="flex items-center gap-1 bg-white/20 px-1.5 py-0.5 rounded-md border border-white/10">
                                                 <span className="opacity-70 font-medium">Hát:</span>
                                                 <span className="font-black text-white uppercase truncate max-w-[80px]">{currentSong.addedBy || 'Khách'}</span>
                                             </div>
@@ -154,7 +156,7 @@ const QueueList = ({ onReAnnounce }) => {
                                     <div className="mt-2 pt-2 border-t border-white/20 flex gap-2 relative z-10">
                                         <button
                                             onClick={onReAnnounce}
-                                            className="flex-1 bg-white/20 hover:bg-white/30 text-white font-black text-[10px] px-3 py-1.5 uppercase tracking-wider rounded-lg transition-all cursor-pointer active:scale-95 backdrop-blur-sm"
+                                            className="flex-1 bg-white/20 hover:bg-white/30 text-white font-black text-[10px] px-3 py-1.5 uppercase tracking-wider rounded-lg transition-all cursor-pointer active:scale-95"
                                         >
                                             🎤 Mời Lên Lại
                                         </button>
@@ -211,7 +213,7 @@ const QueueList = ({ onReAnnounce }) => {
 
             {/* Clear Queue Confirmation Modal */}
             {showClearModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4">
                     <motion.div
                         initial={{ scale: 0.95, opacity: 0 }}
                         animate={{ scale: 1, opacity: 1 }}

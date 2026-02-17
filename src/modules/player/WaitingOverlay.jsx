@@ -1,66 +1,156 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Mic } from 'lucide-react';
+import { Mic, Pause, Play } from 'lucide-react';
 import { useAppStore } from '../core/store';
 
+const HINTS = {
+    weak: { text: '🎤 Hãy gõ mạnh hơn vào mic!', color: 'amber' },
+    medium: { text: '🔊 Gần rồi! Nói to hơn nữa!', color: 'green' },
+};
 
-const WaitingOverlay = ({ countdown: propCountdown, onSkip }) => {
-    const { waitingForGuest, currentSong, waitCountdown } = useAppStore();
+const FloatingOrb = ({ delay, size, x }) => (
+    <div
+        className="inv-orb"
+        style={{
+            width: size,
+            height: size,
+            left: `${x}%`,
+            animationDelay: `${delay}s`,
+        }}
+    />
+);
+
+const SoundwaveRing = ({ delay, size }) => (
+    <div
+        className="inv-ring"
+        style={{
+            width: size,
+            height: size,
+            animationDelay: `${delay}s`,
+        }}
+    />
+);
+
+const WaitingOverlay = ({ countdown: propCountdown, onSkip, onPauseToggle }) => {
+    const waitingForGuest = useAppStore((s) => s.waitingForGuest);
+    const currentSong = useAppStore((s) => s.currentSong);
+    const waitCountdown = useAppStore((s) => s.waitCountdown);
+    const countdownPaused = useAppStore((s) => s.countdownPaused);
+    const micAttemptHint = useAppStore((s) => s.micAttemptHint);
     const countdown = propCountdown ?? waitCountdown;
+
+    const [entered, setEntered] = useState(false);
+
+    useEffect(() => {
+        if (waitingForGuest) {
+            const t = setTimeout(() => setEntered(true), 100);
+            return () => clearTimeout(t);
+        } else {
+            setEntered(false);
+        }
+    }, [waitingForGuest]);
 
     if (!waitingForGuest) return null;
 
     const singer = currentSong?.addedBy || 'Khách';
+    const songTitle = currentSong?.cleanTitle || currentSong?.title || '';
 
-    const handleStartNow = () => {
-        if (onSkip) onSkip();
-    };
+    // SVG circular countdown
+    const radius = 54;
+    const circumference = 2 * Math.PI * radius;
+    const maxSeconds = 30;
+    const progress = Math.max(0, (countdown ?? maxSeconds) / maxSeconds);
+    const strokeOffset = circumference * (1 - progress);
 
-    return createPortal(
-        <div className="fixed inset-0 z-[9999] bg-black flex flex-col items-center justify-center text-white select-none">
-            {/* Pulsing mic icon */}
-            <div className="relative mb-10">
-                <div className="absolute -inset-4 animate-ping rounded-full bg-indigo-500/20" style={{ animationDuration: '2s' }} />
-                <div className="relative w-28 h-28 bg-indigo-600 rounded-full flex items-center justify-center shadow-2xl shadow-indigo-500/40 cursor-pointer hover:scale-105 transition-transform" onClick={handleStartNow}>
-                    <Mic size={56} strokeWidth={2.5} />
-                </div>
-            </div>
+    const hint = micAttemptHint ? HINTS[micAttemptHint] : null;
 
-            {/* Singer name */}
-            <div className="text-6xl font-black uppercase tracking-tight mb-3">
-                {singer}
-            </div>
-            <div className="text-3xl font-black text-indigo-400 uppercase tracking-widest mb-10">
-                Mời Lên Sân Khấu
-            </div>
+    return (
+        <>
+            {/* ── Root Overlay ── */}
+            {entered && createPortal(
+                <div className={`inv-overlay ${entered ? 'inv-overlay--entered' : ''}`}>
+                    {/* Background Orbs */}
+                    <div className="inv-orbs">
+                        <div className="inv-orb" style={{ left: '20%', width: '300px', height: '300px', animationDelay: '0s' }} />
+                        <div className="inv-orb" style={{ left: '70%', width: '400px', height: '400px', animationDelay: '-5s' }} />
+                        <div className="inv-orb" style={{ left: '40%', width: '200px', height: '200px', animationDelay: '-10s' }} />
 
-            {/* Hướng dẫn */}
-            <div className="flex flex-col items-center gap-6">
-                <div className="text-2xl font-black text-white/80 tracking-wide">
-                    🎤 Gõ nhẹ vào Mic hoặc nói <span className="text-green-400">"A Lô"</span>
-                </div>
+                    </div>
 
-                {/* Countdown */}
-                <div className="text-xl font-bold text-white/40">
-                    Tự động phát sau <span className="text-white/70 tabular-nums">{countdown ?? 30}</span> giây
-                </div>
+                    {/* Main Content (Centered & Expanded) */}
+                    <div className="inv-content">
+                        {/* Mic & Rings */}
+                        <div className="inv-mic-wrap" onClick={onSkip}>
+                            <div className="inv-rings">
+                                <div className="inv-ring" style={{ animationDelay: '0s' }} />
+                                <div className="inv-ring" style={{ animationDelay: '1s' }} />
 
-                {/* Manual Start Button */}
-                <button
-                    onClick={handleStartNow}
-                    className="mt-8 px-8 py-3 bg-white/10 hover:bg-white/20 border border-white/20 rounded-full text-lg font-bold backdrop-blur-sm transition-all active:scale-95 flex items-center gap-2"
-                >
-                    <span>BẮT ĐẦU NGAY</span>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M5 12l14 0" />
-                        <path d="M13 18l6 -6" />
-                        <path d="M13 6l6 6" />
-                    </svg>
-                </button>
-            </div>
-        </div>,
-        document.body
+                            </div>
+                            <svg className="inv-countdown-svg" viewBox="0 0 100 100">
+                                <circle cx="50" cy="50" r="48" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="3" />
+                                <circle
+                                    cx="50" cy="50" r="48" fill="none" stroke="#22d3ee" strokeWidth="3"
+                                    strokeDasharray="301.6"
+                                    strokeDashoffset={301.6 * (1 - progress)}
+                                    strokeLinecap="round"
+                                    style={{ transition: countdownPaused ? 'none' : 'stroke-dashoffset 1s linear' }}
+                                    transform="rotate(-90 50 50)"
+                                />
+                            </svg>
+                            <div className="inv-mic-btn">
+                                <Mic size={80} color="#fff" strokeWidth={2.5} />
+                            </div>
+                        </div>
+
+                        {/* Text Content */}
+                        <h1 className="inv-singer">{singer}</h1>
+                        <h2 className="inv-subtitle">MỜI LÊN SÂN KHẤU</h2>
+                        <div className="inv-song">
+                            TRÌNH BÀY BÀI HÁT: <span className="inv-song-title">{songTitle}</span>
+                        </div>
+
+                        <p className="inv-instruction">
+                            Gõ nhẹ vào mic hoặc nói <span className="inv-alo">A Lô</span> để bắt đầu
+                        </p>
+                    </div>
+
+                    {/* Footer Controls (Bottom Pinned) */}
+                    <div className="inv-footer">
+                        {/* Countdown & Pause */}
+                        <div className="inv-countdown-row">
+                            <span className="inv-countdown-text">Tự động phát sau</span>
+                            <span className="inv-countdown-num">{countdown} giây</span>
+                            {onPauseToggle && (
+                                <button className="inv-pause-btn" onClick={(e) => { e.stopPropagation(); onPauseToggle?.(); }}>
+                                    {countdownPaused ? <Play size={16} fill="currentColor" /> : <Pause size={16} fill="currentColor" />}
+                                    {countdownPaused ? 'Tiếp Tục' : 'Dừng Đếm'}
+                                </button>
+                            )}
+                        </div>
+
+                        {/* Manual Start Button */}
+                        <button className="inv-start-btn" onClick={onSkip}>
+                            BẮT ĐẦU NGAY <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M5 12l14 0" />
+                                <path d="M13 18l6 -6" />
+                                <path d="M13 6l6 6" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>,
+                document.body
+            )}
+
+            {/* ── Hint Banner Portal (Always top z-index) ── */}
+            {micAttemptHint && createPortal(
+                <div className={`inv-hint ${micAttemptHint === 'weak' ? 'inv-hint--amber' : 'inv-hint--green'}`}>
+                    {micAttemptHint === 'weak' && "🎤 Hãy gõ mạnh hơn vào mic!"}
+                    {micAttemptHint === 'medium' && "🔊 Gần rồi! Nói to hơn nữa!"}
+                </div>,
+                document.body
+            )}
+        </>
     );
 };
 
-export default WaitingOverlay;
+export default React.memo(WaitingOverlay);

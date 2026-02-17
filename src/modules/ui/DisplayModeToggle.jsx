@@ -1,13 +1,9 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '../core/store';
 
 const DisplayModeToggle = ({ openTV, closeTV, isTVOpen }) => {
     const [mode, setMode] = useState('extend');
     const [loading, setLoading] = useState(false);
-    const containerRef = useRef(null);
-    const ytBtnRef = useRef(null);
-    const krBtnRef = useRef(null);
-    const [sliderStyle, setSliderStyle] = useState({});
 
     useEffect(() => {
         fetch('/api/display/status')
@@ -16,31 +12,11 @@ const DisplayModeToggle = ({ openTV, closeTV, isTVOpen }) => {
             .catch(() => { });
     }, []);
 
-    // Compute slider position from actual button rects
-    const updateSlider = useCallback(() => {
-        const container = containerRef.current;
-        const activeBtn = mode === 'extend' ? krBtnRef.current : ytBtnRef.current;
-        if (!container || !activeBtn) return;
-        const cRect = container.getBoundingClientRect();
-        const bRect = activeBtn.getBoundingClientRect();
-        setSliderStyle({
-            width: bRect.width,
-            transform: `translateX(${bRect.left - cRect.left}px)`,
-        });
-    }, [mode]);
-
-    useEffect(() => {
-        updateSlider();
-        window.addEventListener('resize', updateSlider);
-        return () => window.removeEventListener('resize', updateSlider);
-    }, [updateSlider]);
-
     const switchMode = useCallback(async (newMode) => {
         if (newMode === mode || loading) return;
         setLoading(true);
         try {
             if (newMode === 'duplicate') {
-                // YouTube mode: close TV window + pause karaoke
                 if (isTVOpen) closeTV();
                 useAppStore.getState().setIsPlaying(false);
             }
@@ -48,7 +24,6 @@ const DisplayModeToggle = ({ openTV, closeTV, isTVOpen }) => {
             const data = await res.json();
             setMode(data.mode);
             if (newMode === 'extend') {
-                // Karaoke mode: open TV window, resume if song loaded
                 setTimeout(() => {
                     openTV();
                     const { currentSong } = useAppStore.getState();
@@ -65,21 +40,26 @@ const DisplayModeToggle = ({ openTV, closeTV, isTVOpen }) => {
     const isExtend = mode === 'extend';
 
     return (
-        <div
-            ref={containerRef}
-            className={`dm-seg ${loading ? 'dm-seg--busy' : ''}`}
-        >
-            {/* Sliding pill — absolutely positioned, outside flow */}
+        <div className="relative flex bg-slate-200 rounded-lg p-[3px]" style={{ opacity: loading ? 0.6 : 1 }}>
+            {/* Sliding pill */}
             <div
-                className={`dm-seg__pill ${isExtend ? 'dm-seg__pill--kr' : 'dm-seg__pill--yt'}`}
-                style={sliderStyle}
+                className="absolute top-[3px] bottom-[3px] rounded-md transition-all duration-300 ease-in-out"
+                style={{
+                    width: '50%',
+                    left: isExtend ? '50%' : '3px',
+                    background: isExtend
+                        ? 'linear-gradient(135deg, #22c55e, #16a34a)'
+                        : 'linear-gradient(135deg, #ef4444, #dc2626)',
+                    boxShadow: isExtend
+                        ? '0 2px 8px rgba(34, 197, 94, 0.35)'
+                        : '0 2px 8px rgba(239, 68, 68, 0.35)',
+                }}
             />
 
             <button
-                ref={ytBtnRef}
                 type="button"
                 disabled={loading}
-                className={`dm-seg__btn ${!isExtend ? 'dm-seg__btn--on' : ''}`}
+                className={`relative z-10 flex items-center justify-center gap-1.5 px-4 py-1.5 rounded-md text-xs font-extrabold uppercase tracking-wide cursor-pointer transition-colors duration-200 ${!isExtend ? 'text-white' : 'text-slate-400 hover:text-slate-600'}`}
                 onClick={() => switchMode('duplicate')}
             >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -90,10 +70,9 @@ const DisplayModeToggle = ({ openTV, closeTV, isTVOpen }) => {
             </button>
 
             <button
-                ref={krBtnRef}
                 type="button"
                 disabled={loading}
-                className={`dm-seg__btn ${isExtend ? 'dm-seg__btn--on' : ''}`}
+                className={`relative z-10 flex items-center justify-center gap-1.5 px-4 py-1.5 rounded-md text-xs font-extrabold uppercase tracking-wide cursor-pointer transition-colors duration-200 ${isExtend ? 'text-white' : 'text-slate-400 hover:text-slate-600'}`}
                 onClick={() => switchMode('extend')}
             >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
