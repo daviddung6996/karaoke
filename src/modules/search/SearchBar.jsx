@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import Input from '../ui/Input';
-import { Search, Plus, Music, Sparkles, ExternalLink, Link } from 'lucide-react';
+import { Search, Plus, Music, Sparkles, ExternalLink, Link, Mic } from 'lucide-react';
 import { useAppStore } from '../core/store';
 import { searchVideos } from '../core/videoSearch';
 import { useSuggestions } from './useSuggestions';
@@ -33,8 +33,231 @@ const SearchBar = ({ isExpanded = false }) => {
     const [showModal, setShowModal] = useState(false);
     const [selectedTrack, setSelectedTrack] = useState(null);
 
+    // Voice Search State
+    const [isListening, setIsListening] = useState(false);
+    const [voiceStatus, setVoiceStatus] = useState(''); // 'listening' | 'processing' | ''
+    const [voiceError, setVoiceError] = useState('');
+    const [interimText, setInterimText] = useState(''); // Real-time preview
+    const recognitionRef = useRef(null);
+    // Gemini fallback refs (only used when Web Speech API unavailable)
+    const mediaRecorderRef = useRef(null);
+    const streamRef = useRef(null);
+    const chunksRef = useRef([]);
+    const maxTimerRef = useRef(null);
+    const useGeminiFallback = useRef(!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window));
+
     const { suggestions, isLoading: isSuggesting } = useSuggestions(query, isFocused);
     const { addToQueue, updateQueueItem, queueMode } = useAppStore();
+
+    const GEMINI_KEY = import.meta.env.VITE_GEMINI_KEY;
+
+    // Transcribe audio via Gemini API
+    const transcribeWithGemini = async (audioBlob) => {
+        const buffer = await audioBlob.arrayBuffer();
+        const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+
+        const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{
+                        parts: [
+                            {
+                                inlineData: {
+                                    mimeType: audioBlob.type || 'audio/webm',
+                                    data: base64
+                                }
+                            },
+                            { text: 'Transcribe this Vietnamese audio. Return ONLY the spoken text, nothing else. If no speech is detected, return empty string.' }
+                        ]
+                    }],
+                    generationConfig: {
+                        max_output_tokens: 200,
+                        temperature: 0.1,
+                        thinkingConfig: { thinkingBudget: 0 }
+                    }
+                })
+            }
+        );
+
+        if (!response.ok) throw new Error(`Gemini API error: ${response.status}`);
+        const data = await response.json();
+        return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+    };
+
+    // === Web Speech API (FREE - primary method) ===
+    const startWebSpeech = useCallback(() => {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'vi-VN';
+        recognition.continuous = false;
+        recognition.interimResults = true;
+        recognition.maxAlternatives = 1;
+
+        recognitionRef.current = recognition;
+        let gotFinalResult = false;
+        let gotError = false;
+
+        setIsListening(true);
+        setVoiceStatus('listening');
+        setVoiceError('');
+        setInterimText('');
+
+        recognition.onresult = (event) => {
+            let finalText = '';
+            let interim = '';
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+                const transcript = event.results[i][0].transcript;
+                if (event.results[i].isFinal) {
+                    finalText += transcript;
+                } else {
+                    interim += transcript;
+                }
+            }
+
+            if (finalText) {
+                gotFinalResult = true;
+                setInterimText('');
+                setQuery(finalText);
+                handleSearch(finalText);
+                setIsListening(false);
+                setVoiceStatus('');
+            } else {
+                setInterimText(interim);
+            }
+        };
+
+        recognition.onerror = (event) => {
+            gotError = true;
+            console.error('[Voice] Web Speech error:', event.error);
+            if (event.error === 'no-speech') {
+                setVoiceError('Không nghe thấy giọng nói, thử lại nhé');
+            } else if (event.error === 'not-allowed') {
+                setVoiceError('Không thể truy cập microphone');
+            } else {
+                setVoiceError('Lỗi nhận dạng giọng nói');
+            }
+            setTimeout(() => {
+                setIsListening(false);
+                setVoiceStatus('');
+                setInterimText('');
+            }, 1500);
+        };
+
+        recognition.onend = () => {
+            // If ended without final result or error (e.g., silence timeout)
+            if (!gotFinalResult && !gotError) {
+                setIsListening(false);
+                setVoiceStatus('');
+                setInterimText('');
+            }
+        };
+
+        recognition.start();
+    }, []);
+
+    // === Gemini fallback (only for browsers without Web Speech API) ===
+    const startGeminiFallback = useCallback(async () => {
+        if (!GEMINI_KEY) return;
+
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(t => t.stop());
+        }
+        clearTimeout(maxTimerRef.current);
+
+        setIsListening(true);
+        setVoiceStatus('listening');
+        setVoiceError('');
+        chunksRef.current = [];
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            streamRef.current = stream;
+
+            const recorder = new MediaRecorder(stream);
+            mediaRecorderRef.current = recorder;
+
+            recorder.ondataavailable = (e) => {
+                if (e.data.size > 0) chunksRef.current.push(e.data);
+            };
+
+            recorder.onstop = async () => {
+                stream.getTracks().forEach(t => t.stop());
+                streamRef.current = null;
+
+                if (chunksRef.current.length === 0) {
+                    setIsListening(false);
+                    setVoiceStatus('');
+                    return;
+                }
+
+                setVoiceStatus('processing');
+                try {
+                    const blob = new Blob(chunksRef.current, { type: recorder.mimeType });
+                    const text = await transcribeWithGemini(blob);
+                    if (text) {
+                        setQuery(text);
+                        handleSearch(text);
+                    } else {
+                        setVoiceError('Không nghe thấy giọng nói, thử lại nhé');
+                        await new Promise(r => setTimeout(r, 1500));
+                    }
+                } catch (err) {
+                    console.error('[Voice] Gemini transcribe failed:', err);
+                    setVoiceError('Lỗi nhận dạng giọng nói');
+                    await new Promise(r => setTimeout(r, 1500));
+                } finally {
+                    setIsListening(false);
+                    setVoiceStatus('');
+                }
+            };
+
+            recorder.start();
+            maxTimerRef.current = setTimeout(() => stopVoiceSearch(), 10000);
+        } catch (err) {
+            console.error('[Voice] Mic access failed:', err);
+            setVoiceError('Không thể truy cập microphone');
+            setTimeout(() => {
+                setIsListening(false);
+                setVoiceStatus('');
+            }, 1500);
+        }
+    }, [GEMINI_KEY]);
+
+    const startVoiceSearch = useCallback(() => {
+        if (useGeminiFallback.current) {
+            startGeminiFallback();
+        } else {
+            startWebSpeech();
+        }
+    }, [startWebSpeech, startGeminiFallback]);
+
+    const stopVoiceSearch = useCallback(() => {
+        // Stop Web Speech API
+        if (recognitionRef.current) {
+            recognitionRef.current.stop();
+            recognitionRef.current = null;
+        }
+        // Stop Gemini fallback
+        clearTimeout(maxTimerRef.current);
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+            mediaRecorderRef.current.stop();
+        }
+    }, []);
+
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => {
+            if (recognitionRef.current) recognitionRef.current.abort();
+            clearTimeout(maxTimerRef.current);
+            if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+            if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+                mediaRecorderRef.current.stop();
+            }
+        };
+    }, []);
 
     const handleSearch = async (searchQuery) => {
         const q = searchQuery || query;
@@ -96,8 +319,6 @@ const SearchBar = ({ isExpanded = false }) => {
     const handleConfirmAdd = async (guestName, isPriority = false) => {
         if (!selectedTrack) return;
 
-        console.log('[SearchBar] handleConfirmAdd called:', { guestName, isPriority, title: selectedTrack.title });
-
         const rawTitle = selectedTrack.title;
         const rawArtist = selectedTrack.artist;
 
@@ -134,7 +355,6 @@ const SearchBar = ({ isExpanded = false }) => {
         // useFirebaseSync will pick it up from Firebase listener
         if (firebaseKey && firebaseKey !== Date.now().toString()) {
             // Firebase key means it came from Firebase, wait for sync
-            console.log('[SearchBar] Waiting for Firebase sync instead of adding locally...');
         } else {
             // Only add locally if Firebase failed (fallback mode)
             addToQueue({
@@ -164,7 +384,6 @@ const SearchBar = ({ isExpanded = false }) => {
         import('../core/geminiService').then(({ cleanSongTitle }) => {
             cleanSongTitle(rawTitle).then(cleaned => {
                 if (cleaned && firebaseKey) {
-                    console.log("LLM Cleaned:", rawTitle, "->", cleaned);
                     // Update Firebase if we have a key
                     if (firebaseKey && firebaseKey !== Date.now().toString()) {
                         import('firebase/database').then(({ ref, update, getDatabase }) => {
@@ -188,9 +407,9 @@ const SearchBar = ({ isExpanded = false }) => {
     };
 
     // Scroll to top when results change
-    const resultsContainerRef = React.useRef(null);
+    const resultsContainerRef = useRef(null);
 
-    React.useEffect(() => {
+    useEffect(() => {
         if (resultsContainerRef.current) {
             resultsContainerRef.current.scrollTop = 0;
         }
@@ -204,7 +423,7 @@ const SearchBar = ({ isExpanded = false }) => {
                     <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                     <Input
                         placeholder="Tìm bài hát..."
-                        className="pl-8 h-9 text-sm font-bold rounded-lg border-slate-200 focus:border-indigo-500 focus:ring-indigo-100 block w-full bg-slate-50 text-slate-800 placeholder:text-slate-300 transition-all"
+                        className="pl-8 pr-10 h-9 text-sm font-bold rounded-lg border-slate-200 focus:border-indigo-500 focus:ring-indigo-100 block w-full bg-slate-50 text-slate-800 placeholder:text-slate-300 transition-all"
                         value={query}
                         onChange={(e) => {
                             const val = e.target.value;
@@ -221,11 +440,24 @@ const SearchBar = ({ isExpanded = false }) => {
                         onBlur={() => setTimeout(() => setIsFocused(false), 200)}
                     />
 
-                    {isSearching && (
-                        <div className="absolute right-2.5 top-1/2 -translate-y-1/2">
+                    {/* Voice Search / Loading indicator */}
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center">
+                        {isSearching ? (
                             <div className="animate-spin h-4 w-4 border-2 border-indigo-500 border-t-transparent rounded-full"></div>
-                        </div>
-                    )}
+                        ) : (
+                            <button
+                                type="button"
+                                onClick={isListening ? stopVoiceSearch : startVoiceSearch}
+                                className={`p-1 rounded-full transition-all cursor-pointer ${isListening
+                                    ? 'text-red-500 bg-red-50 animate-pulse'
+                                    : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'
+                                }`}
+                                title={isListening ? 'Đang nghe...' : 'Tìm bằng giọng nói'}
+                            >
+                                <Mic size={16} strokeWidth={2.5} />
+                            </button>
+                        )}
+                    </div>
 
                     {/* Smart Suggestion Dropdown */}
                     {isFocused && (query.trim().length >= 2) && (
@@ -369,6 +601,85 @@ const SearchBar = ({ isExpanded = false }) => {
                     ))}
                 </div>
             </div>
+
+            {/* Voice Search Overlay */}
+            {isListening && (
+                <div className="fixed inset-0 z-[9999] bg-white/95 backdrop-blur-sm flex flex-col items-center justify-center">
+                    {/* Mic button with ripple */}
+                    <div className="relative mb-8">
+                        {voiceStatus === 'listening' && !voiceError && (
+                            <>
+                                <div className="absolute inset-0 w-28 h-28 -m-6 rounded-full bg-red-100 animate-ping opacity-30" />
+                                <div className="absolute inset-0 w-24 h-24 -m-4 rounded-full bg-red-50 animate-pulse opacity-50" />
+                            </>
+                        )}
+                        <button
+                            onClick={voiceStatus === 'listening' ? stopVoiceSearch : undefined}
+                            className={`relative w-16 h-16 rounded-full flex items-center justify-center shadow-lg transition-all cursor-pointer active:scale-95 ${
+                                voiceStatus === 'processing'
+                                    ? 'bg-indigo-500 shadow-indigo-200'
+                                    : voiceError
+                                        ? 'bg-slate-400 shadow-slate-200'
+                                        : 'bg-red-500 hover:bg-red-600 shadow-red-200'
+                            } text-white`}
+                        >
+                            {voiceStatus === 'processing'
+                                ? <div className="animate-spin h-6 w-6 border-3 border-white border-t-transparent rounded-full" />
+                                : <Mic size={28} strokeWidth={2.5} />
+                            }
+                        </button>
+                    </div>
+
+                    {/* Real-time interim text */}
+                    {interimText && !voiceError && (
+                        <p className="text-xl font-bold text-indigo-600 mb-3 px-8 text-center animate-pulse">
+                            "{interimText}"
+                        </p>
+                    )}
+
+                    <p className={`text-lg font-bold mb-2 ${voiceError ? 'text-red-500' : 'text-slate-700'}`}>
+                        {voiceError
+                            || (voiceStatus === 'processing' ? 'Đang nhận dạng...' : 'Đang nghe...')}
+                    </p>
+                    <p className="text-xs text-slate-400 font-medium">
+                        {voiceError
+                            ? ''
+                            : voiceStatus === 'listening'
+                                ? useGeminiFallback.current
+                                    ? 'Nói xong thì bấm nút mic để tìm'
+                                    : 'Nói tên bài hát...'
+                                : 'Đang xử lý giọng nói'}
+                    </p>
+
+                    {voiceStatus === 'listening' && (
+                        <button
+                            onClick={() => {
+                                // Stop Web Speech API
+                                if (recognitionRef.current) {
+                                    recognitionRef.current.abort();
+                                    recognitionRef.current = null;
+                                }
+                                // Stop Gemini fallback
+                                clearTimeout(maxTimerRef.current);
+                                if (streamRef.current) {
+                                    streamRef.current.getTracks().forEach(t => t.stop());
+                                    streamRef.current = null;
+                                }
+                                if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+                                    mediaRecorderRef.current.stop();
+                                    mediaRecorderRef.current = null;
+                                }
+                                setIsListening(false);
+                                setVoiceStatus('');
+                                setInterimText('');
+                            }}
+                            className="mt-8 text-xs font-bold text-slate-400 hover:text-slate-600 transition-colors cursor-pointer uppercase tracking-widest"
+                        >
+                            Huỷ
+                        </button>
+                    )}
+                </div>
+            )}
 
             {/* Guest Name Modal */}
             <GuestNameModal

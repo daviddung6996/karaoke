@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAppStore } from '../core/store';
 import { getPlayerTime, getDuration } from './playerRegistry';
 import { Volume2, VolumeX, Volume1 } from 'lucide-react';
@@ -26,10 +26,13 @@ const formatTime = (seconds) => {
 const PlayerControls = () => {
     const currentSong = useAppStore((s) => s.currentSong);
     const restartTrigger = useAppStore((s) => s.restartTrigger);
+    const volume = useAppStore((s) => s.volume);
+    const setVolume = useAppStore((s) => s.setVolume);
+    const isMuted = useAppStore((s) => s.isMuted);
+    const setIsMuted = useAppStore((s) => s.setIsMuted);
+
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
-    const [volume, setVolumeState] = useState(100);
-    const [isMuted, setIsMuted] = useState(false);
     const isRestartingRef = useRef(false);
     const prevVolumeRef = useRef(100);
 
@@ -65,8 +68,7 @@ const PlayerControls = () => {
     // Volume
     const handleVolumeChange = (e) => {
         const val = Number(e.target.value);
-        setVolumeState(val);
-        sendToTV('SET_VOLUME', val);
+        setVolume(val);
         if (val > 0) {
             setIsMuted(false);
             prevVolumeRef.current = val;
@@ -76,15 +78,11 @@ const PlayerControls = () => {
     const toggleMute = () => {
         if (isMuted) {
             setIsMuted(false);
-            setVolumeState(prevVolumeRef.current);
-            sendToTV('SET_VOLUME', prevVolumeRef.current);
-            sendToTV('SET_MUTE', false);
+            setVolume(prevVolumeRef.current);
         } else {
             prevVolumeRef.current = volume;
             setIsMuted(true);
-            setVolumeState(0);
-            sendToTV('SET_VOLUME', 0);
-            sendToTV('SET_MUTE', true);
+            setVolume(0);
         }
     };
 

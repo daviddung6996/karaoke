@@ -30,7 +30,6 @@ export function useFirebaseSync(isRefresh) {
                 // If I am the Host, maybe I should clear?
                 // Use caution: If I reload the Host page, I don't want to wipe the queue for everyone.
 
-                console.log('[FirebaseSync] Received playQueue from Firebase:', firebaseItems.length, 'items');
             }
 
             // Map firebase items to App format
@@ -81,7 +80,6 @@ export function useFirebaseSync(isRefresh) {
 
         for (const key of prevKeys) {
             if (!currentKeys.has(key)) {
-                console.log('[FirebaseSync] Item removed locally, syncing to Firebase:', key);
                 // remove from Firebase
                 removeFromFirebaseQueue(key).catch(err => console.error("Remove failed", err));
             }

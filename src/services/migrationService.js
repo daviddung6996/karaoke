@@ -6,7 +6,6 @@ import { database } from './firebaseConfig';
 
 // Let's create a service function we can trigger from the execution
 export async function migrateLegacyQueue() {
-    console.log("Starting Migration...");
     const queueRef = ref(database, 'queue');
     const customerQueuesRef = ref(database, 'customerQueues');
     const playQueueRef = ref(database, 'playQueue');
@@ -14,7 +13,6 @@ export async function migrateLegacyQueue() {
     try {
         const snapshot = await get(queueRef);
         if (!snapshot.exists()) {
-            console.log("No legacy queue to migrate.");
             return;
         }
 
@@ -22,8 +20,6 @@ export async function migrateLegacyQueue() {
         const legacyItems = Object.values(legacyData); // Array of items
 
         if (legacyItems.length === 0) return;
-
-        console.log(`Found ${legacyItems.length} items. Migrating...`);
 
         // Group by addedBy (Name) since we don't have IDs
         const startTimestamp = Date.now();
@@ -71,8 +67,6 @@ export async function migrateLegacyQueue() {
         // await update(ref(database), updates); 
         // This is fine.
 
-        console.log("Migration Complete. Customer Queues updated.");
-
         // Sync Playqueue
         const { generatePlayQueue } = await import('./queueLogic');
 
@@ -82,7 +76,6 @@ export async function migrateLegacyQueue() {
         const newPlayQueue = generatePlayQueue(fullQueues);
 
         await set(playQueueRef, newPlayQueue);
-        console.log("PlayQueue Generated.", newPlayQueue.length, "items.");
 
     } catch (e) {
         console.error("Migration Failed:", e);

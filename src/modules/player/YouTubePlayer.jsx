@@ -19,7 +19,6 @@ const YouTubePlayer = ({ className, onReady, onStateChange, onEnded, muted = fal
     const playerRef = useRef(null);
     const justLoadedRef = useRef(false);
     const containerRef = useRef(null);
-    const hasUnmutedRef = useRef(false);
 
     const opts = React.useMemo(() => ({
         height: '100%',
@@ -46,7 +45,6 @@ const YouTubePlayer = ({ className, onReady, onStateChange, onEnded, muted = fal
         const handleGlobalClick = () => {
             if (playerRef.current) {
                 playerRef.current.unMute();
-                playerRef.current.setVolume(100);
             }
         };
 
@@ -87,10 +85,8 @@ const YouTubePlayer = ({ className, onReady, onStateChange, onEnded, muted = fal
             // Only unmute when Host sends PLAY (store.isPlaying=true)
             if (shouldPlay) {
                 event.target.unMute();
-                event.target.setVolume(100);
             } else {
                 event.target.mute();
-                event.target.setVolume(0);
             }
         } else if (shouldPlay) {
             event.target.playVideo();
@@ -104,10 +100,6 @@ const YouTubePlayer = ({ className, onReady, onStateChange, onEnded, muted = fal
 
     // Unregister on unmount AND on videoId change (before new player mounts)
     useEffect(() => {
-        hasUnmutedRef.current = false;
-
-        // Cue trick removed — usePlayerSync handles TV playback control directly
-
         return () => {
             if (window.ytQualityInterval) clearInterval(window.ytQualityInterval);
             if (!currentSong?.videoId) { // Only unregister if truly unmounting/clearing
@@ -128,8 +120,8 @@ const YouTubePlayer = ({ className, onReady, onStateChange, onEnded, muted = fal
         // This covers waitingForGuest AND the gap before it's set (during TTS)
         if (passive && event.data === 1 && (!store.isPlaying || store.waitingForGuest)) {
             event.target.mute();
-            event.target.setVolume(0);
-            // Also pause the video so it doesn't play visually during invitation
+            // Don't setVolume(0) here — mute() is sufficient to silence audio.
+            // Setting volume to 0 causes unmutePlayer() to reset to 100, losing user's volume.
             event.target.pauseVideo();
             return;
         }
@@ -150,13 +142,12 @@ const YouTubePlayer = ({ className, onReady, onStateChange, onEnded, muted = fal
 
         if (passive) {
             // TV mode: unmute/mute based on store state
+            // Volume is controlled by usePlayerSync, do NOT reset it here
             if (event.data === 1) {
                 if (store.isPlaying && !store.waitingForGuest) {
                     event.target.unMute();
-                    event.target.setVolume(100);
                 } else {
                     event.target.mute();
-                    event.target.setVolume(0);
                 }
             }
         } else {

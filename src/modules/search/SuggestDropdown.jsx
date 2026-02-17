@@ -1,6 +1,5 @@
-
-import React from 'react';
-import { Search, Music, Sparkles } from 'lucide-react';
+import { Fragment } from 'react';
+import { Music, Sparkles } from 'lucide-react';
 
 const SuggestDropdown = ({ suggestions, isLoading, onSelect, selectedIndex = -1 }) => {
     if (isLoading) {
@@ -24,7 +23,7 @@ const SuggestDropdown = ({ suggestions, isLoading, onSelect, selectedIndex = -1 
                     const isFirstAI = item.source === 'ai' && (index === 0 || suggestions[index - 1].source !== 'ai');
 
                     return (
-                        <React.Fragment key={index}>
+                        <Fragment key={index}>
                             {isFirstAI && (
                                 <div className="px-4 py-2 bg-indigo-50 text-xs font-bold text-indigo-500 uppercase tracking-widest flex items-center gap-2 mt-1 border-t border-indigo-100">
                                     <Sparkles size={12} />
@@ -53,7 +52,7 @@ const SuggestDropdown = ({ suggestions, isLoading, onSelect, selectedIndex = -1 
 
                                 </div>
                             </div>
-                        </React.Fragment>
+                        </Fragment>
                     );
                 })}
             </div>

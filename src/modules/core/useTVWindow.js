@@ -62,19 +62,11 @@ export const useTVWindow = () => {
             // Only fullscreen + reposition if we found a SECONDARY screen
             if (targetScreen) {
                 const tryFullscreen = () => {
-                    console.log(`[TV] Targeting secondary screen: ${targetScreen.width}x${targetScreen.height} at (${targetScreen.left},${targetScreen.top})`);
-
                     // Strategy 1: requestFullscreen with { screen } option (Window Management API)
-                    let fsSucceeded = false;
                     try {
                         // This API allows fullscreen on a SPECIFIC screen
                         tvWindow.document.documentElement.requestFullscreen({ screen: targetScreen })
-                            .then(() => {
-                                fsSucceeded = true;
-                                console.log('[TV] Fullscreen on secondary screen OK (screen option)');
-                            })
                             .catch(() => {
-                                console.log('[TV] requestFullscreen({screen}) blocked — using position fallback');
                                 forcePosition();
                             });
                     } catch {
@@ -100,8 +92,6 @@ export const useTVWindow = () => {
                 } else {
                     tvWindow.addEventListener('load', tryFullscreen);
                 }
-            } else {
-                console.log('[TV] No secondary screen detected — opened as popup on primary screen (no fullscreen)');
             }
         }
     }, []);

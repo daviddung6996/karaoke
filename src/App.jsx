@@ -50,7 +50,6 @@ const ControlPanel = () => {
   };
 
   const handleSongEnd = React.useCallback(() => {
-    console.log("Song ended. Auto-playing next...");
     handleNext();
   }, [queue, removeFromQueue, setCurrentSong, setIsPlaying]);
 
@@ -78,7 +77,6 @@ const ControlPanel = () => {
   React.useEffect(() => {
     if (!restoreComplete) return;
     if (!currentSong && queue.length > 0 && queueMode === 'auto') {
-      console.log('[AutoPlay] Idle state detected with songs in queue. Auto-playing...');
       const nextSong = queue[0];
       setCurrentSong(nextSong);
       removeFromQueue(nextSong.id);
@@ -111,7 +109,6 @@ const ControlPanel = () => {
     if (initialLoadRef.current) {
       initialLoadRef.current = false;
       if (isRefresh && !currentSong) {
-        console.log('[App] Skipping initial clearNowPlaying due to refresh');
         return;
       }
     }
@@ -122,8 +119,7 @@ const ControlPanel = () => {
       // SAFETY: Ensure it's removed from Firebase queue so it doesn't show as "Upcoming" on customer devices
       // Only do this if the song has a firebaseKey (not a restored song which uses videoId as id)
       if (currentSong.firebaseKey) {
-        console.log('[App] Force removing playing song from Firebase queue:', currentSong.firebaseKey);
-        removeFromFirebaseQueue(currentSong.firebaseKey).catch(err => console.warn('Force remove failed:', err));
+        removeFromFirebaseQueue(currentSong.firebaseKey).catch(() => { });
       }
     } else {
       saveCurrentSongToSession(null);
@@ -171,7 +167,6 @@ const ControlPanel = () => {
     }
 
     const msg = `Xin mời ${singer} lên sân khấu, trình bày ca khúc ${songName}`;
-    console.log("Announcing:", msg);
     await announce(msg);
   }, [announce]);
 
@@ -186,7 +181,6 @@ const ControlPanel = () => {
       if (song.cleanTitle) {
         await performAnnouncement(song);
       } else {
-        console.log("Waiting for LLM to clean title (manual invite)...");
         await new Promise((r) => setTimeout(r, 3000));
         await performAnnouncement(song);
       }
@@ -206,7 +200,6 @@ const ControlPanel = () => {
 
     // Skip TTS announcement for restored songs on F5 refresh
     if (isRestoredSong) {
-      console.log('[App] Skipping announcement for restored song:', currentSong.title);
       setAnnouncedSongId(currentSong.id);
       setIsRestoredSong(false); // Reset for next time
       return;
@@ -236,13 +229,11 @@ const ControlPanel = () => {
 
       // Manual mode: announce only, don't auto-play — host clicks "Phát"
       if (queueMode === 'manual') {
-        console.log('[Manual] Announced. Waiting for host to press Phát.');
         setAnnouncedSongId(currentSong.id);
         return;
       }
 
       // Auto mode: wait for guest to arrive on stage via mic detection
-      console.log("Waiting for guest on stage (mic detection)...");
       setWaitingForGuest(true);
 
       const reason = await waitForPresence(abortController.signal, setWaitCountdown, (level) => {
@@ -252,7 +243,6 @@ const ControlPanel = () => {
       });
       setWaitingForGuest(false);
       setMicAttemptHint(null);
-      console.log("Mic detection resolved:", reason);
 
       // If aborted but NOT skipped manually, stop here (it means song changed or other abort)
       if (abortController.signal.aborted && !skipWaitRef.current) return;
@@ -266,10 +256,8 @@ const ControlPanel = () => {
       doAnnounceAndPlay();
     } else {
       // Wait up to 3 seconds for LLM to finish
-      console.log("Waiting for LLM to clean title...");
       const timer = setTimeout(() => {
         if (currentSong.id !== announcedSongId) {
-          console.log("LLM timed out, using fallback");
           doAnnounceAndPlay();
         }
       }, 3000);
@@ -312,7 +300,6 @@ const ControlPanel = () => {
   // Re-announce TTS for current song (manual mode)
   const handleReAnnounce = React.useCallback(() => {
     if (currentSong) {
-      console.log('[Manual] Re-announcing current song');
       performAnnouncement(currentSong);
     }
   }, [currentSong, performAnnouncement]);

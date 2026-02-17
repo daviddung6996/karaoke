@@ -85,10 +85,8 @@ export const useMicDetection = () => {
                 const audioCtx = new AudioContext();
                 audioCtxRef.current = audioCtx;
                 if (audioCtx.state === 'suspended') {
-                    console.log('[Mic] AudioContext suspended, resuming...');
                     await audioCtx.resume();
                 }
-                console.log('[Mic] AudioContext state:', audioCtx.state, '| Stream active:', stream.active);
                 const source = audioCtx.createMediaStreamSource(stream);
                 const analyser = audioCtx.createAnalyser();
                 analyser.fftSize = 2048;
@@ -130,7 +128,6 @@ export const useMicDetection = () => {
 
                     // Start settle timer once warmup is done
                     if (!settleTime) {
-                        console.log('[Mic] Warmup done. Starting noise floor collection...');
                         settleTime = Date.now() + SETTLE_MS;
                     }
 
@@ -171,7 +168,6 @@ export const useMicDetection = () => {
                                 noiseFloorVoiceRms = voiceRmses[p90] || voiceRmses[voiceRmses.length - 1];
                                 noiseEstablished = true;
                             }
-                            console.log(`[Mic] Noise floor established: peak=${noiseFloorPeak.toFixed(3)} voiceRms=${noiseFloorVoiceRms.toFixed(3)} (from ${noiseFloorSamples.length} samples)`);
                         } else {
                             // Collect samples every ~3 frames for variety
                             if (debugCounter % 3 === 0) {
@@ -185,9 +181,6 @@ export const useMicDetection = () => {
 
                     // ── Active detection phase ──
                     debugCounter++;
-                    if (debugCounter % 60 === 0) {
-                        console.log(`[Mic] peak=${peak.toFixed(3)} voiceRms=${voiceRms.toFixed(3)} ratio=${voiceRatio.toFixed(2)} | floor: peak=${noiseFloorPeak.toFixed(3)} voiceRms=${noiseFloorVoiceRms.toFixed(3)}`);
-                    }
 
                     // Dynamic thresholds based on noise floor
                     const effectiveSpike = Math.max(SPIKE_THRESHOLD, noiseFloorPeak * 2.5);
@@ -199,7 +192,6 @@ export const useMicDetection = () => {
                     if (peak > effectiveSpike) {
                         spikeFrames++;
                         if (spikeFrames >= SPIKE_CONFIRM_FRAMES) {
-                            console.log(`[Mic] SPIKE confirmed! peak=${peak.toFixed(3)} threshold=${effectiveSpike.toFixed(3)} frames=${spikeFrames}`);
                             done('mic');
                             return;
                         }
@@ -213,16 +205,11 @@ export const useMicDetection = () => {
                     if (voiceRms > effectiveVoiceThreshold && voiceRatio > 0.5) {
                         if (!voiceAboveSince) {
                             voiceAboveSince = Date.now();
-                            console.log(`[Mic] Voice candidate started: voiceRms=${voiceRms.toFixed(3)} threshold=${effectiveVoiceThreshold.toFixed(3)}`);
                         } else if (Date.now() - voiceAboveSince >= VOICE_SUSTAINED_MS) {
-                            console.log(`[Mic] Sustained voice confirmed! voiceRms=${voiceRms.toFixed(3)} ratio=${voiceRatio.toFixed(2)} duration=${VOICE_SUSTAINED_MS}ms`);
                             done('mic');
                             return;
                         }
                     } else {
-                        if (voiceAboveSince) {
-                            console.log(`[Mic] Voice candidate dropped after ${Date.now() - voiceAboveSince}ms`);
-                        }
                         voiceAboveSince = null;
                     }
 

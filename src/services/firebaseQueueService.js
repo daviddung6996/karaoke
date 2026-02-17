@@ -162,8 +162,17 @@ export function clearFirebaseQueue() {
 export function setNowPlaying(song) {
     if (!firebaseReady || !database) return Promise.resolve();
     const npRef = ref(database, 'nowPlaying');
+
+    // Sanitize song object: remove undefined values
+    const safeSong = { ...song };
+    Object.keys(safeSong).forEach(key => {
+        if (safeSong[key] === undefined) {
+            safeSong[key] = null; // or delete safeSong[key]
+        }
+    });
+
     return set(npRef, {
-        ...song, // Save full song object
+        ...safeSong, // Save sanitized song object
         startedAt: Date.now(),
     });
 }

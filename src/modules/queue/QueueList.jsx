@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useAppStore } from '../core/store';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
@@ -118,7 +118,6 @@ const QueueList = ({ onReAnnounce }) => {
             // Also clear local queue
             queue.forEach((item) => removeFromQueue(item.id));
             setShowClearModal(false);
-            console.log('[QueueList] Queue cleared');
         } catch (err) {
             console.error('[QueueList] Clear queue failed:', err);
         }

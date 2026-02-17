@@ -5,6 +5,12 @@
 let _player = null;
 let _ready = false;
 
+// Track the last intentional volume so unmutePlayer() can restore correctly
+let _lastIntendedVolume = 100;
+
+// Track whether the HOST user explicitly muted (vs system mute for song transitions)
+let _isUserMuted = false;
+
 // Remote state (for Host when TV is playing)
 let _remoteTime = 0;
 let _remoteDuration = 0;
@@ -83,13 +89,14 @@ export const getVolume = () => {
     }
 };
 
-export const setVolume = (vol) => {
+export const setVolume = (vol, allowUnmute = true) => {
     try {
         if (!_player || !_ready) return;
         const v = Math.max(0, Math.min(100, vol));
+        if (v > 0) _lastIntendedVolume = v;
         _player.setVolume(v);
         // YouTube API quirk: setVolume doesn't unmute if player was muted
-        if (v > 0) {
+        if (v > 0 && allowUnmute) {
             _player.unMute();
         }
     } catch (err) {
@@ -101,15 +108,32 @@ export const mutePlayer = () => {
     try {
         if (!_player || !_ready) return;
         _player.mute();
-        _player.setVolume(0);  // Bonus: volume-based silencing
     } catch { }
 };
 
 export const unmutePlayer = () => {
     try {
         if (!_player || !_ready) return;
+        // Respect user mute — don't unmute if HOST user explicitly muted
+        if (_isUserMuted) return;
         _player.unMute();
-        _player.setVolume(100); // Bonus: volume-based unmuting
+        // Always restore volume — new songs reset YouTube player to default 100,
+        // and HOST won't re-send SET_VOLUME if store value hasn't changed.
+        _player.setVolume(_lastIntendedVolume);
+    } catch { }
+};
+
+// Called from SET_MUTE handler — tracks explicit user mute intent
+export const setUserMuted = (muted) => {
+    _isUserMuted = muted;
+    try {
+        if (!_player || !_ready) return;
+        if (muted) {
+            _player.mute();
+        } else {
+            _player.unMute();
+            _player.setVolume(_lastIntendedVolume);
+        }
     } catch { }
 };
 

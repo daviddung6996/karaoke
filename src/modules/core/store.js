@@ -48,6 +48,11 @@ export const useAppStore = create((set) => ({
     setCurrentSong: (song) => set({ currentSong: song }),
     setIsPlaying: (isPlaying) => set({ isPlaying }),
     triggerRestart: () => set((state) => ({ restartTrigger: state.restartTrigger + 1, isPlaying: true })),
+    // Volume State
+    volume: 100,
+    isMuted: false,
+    setVolume: (vol) => set({ volume: vol }),
+    setIsMuted: (val) => set({ isMuted: val }),
 
     // Projection State
     isProjectionOpen: false,

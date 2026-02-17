@@ -67,7 +67,6 @@ const Watchdog = React.memo(() => {
                 unmutePlayer();
             } else if (state === -1 || state === 5 || state === 2) {
                 // Stuck or paused unexpectedly — kickstart with mute trick
-                console.log(`[Watchdog] Player state ${state} while isPlaying=true. Kickstarting...`);
                 mutePlayer();
                 playPlayer();
                 setTimeout(() => unmutePlayer(), 500);
@@ -134,7 +133,6 @@ const ValidationView = () => {
     }, []);
 
     const handleSongEnded = useCallback(() => {
-        console.log('[TV] Song ended, sending signal to host');
         sendMessage('SONG_ENDED');
     }, [sendMessage]);
 
@@ -155,11 +153,10 @@ const ValidationView = () => {
                     const isSecondary = details.screens.length > 1 && current !== details.screens.find(s => s.isPrimary);
 
                     if (isSecondary && !document.fullscreenElement) {
-                        console.log('[TV Page] On secondary screen — requesting fullscreen');
                         document.documentElement.requestFullscreen().catch(() => { });
                     }
                 } catch {
-                    console.log('[TV Page] Cannot detect screen — skipping fullscreen');
+                    // Screen detection not available
                 }
             }
         };

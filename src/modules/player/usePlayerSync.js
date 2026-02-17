@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useAppStore } from '../core/store';
-import { getPlayerTime, getDuration, getPlayer, isPlayerReady, setVolume, mutePlayer, unmutePlayer, playPlayer, pausePlayer, updateRemoteState, triggerRemoteSongEnded } from './playerRegistry';
+import { getPlayerTime, getDuration, getPlayer, isPlayerReady, setVolume, mutePlayer, unmutePlayer, setUserMuted, playPlayer, pausePlayer, updateRemoteState, triggerRemoteSongEnded } from './playerRegistry';
 
 const CHANNEL_NAME = 'karaoke_sync_channel';
 
@@ -137,12 +137,13 @@ export const usePlayerSync = (role = 'host', { onSongEnded } = {}) => {
                 }
 
                 case 'SET_VOLUME':
-                    setVolume(payload);
+                    // Only allow unmute if we are supposedly playing
+                    // This prevents volume adjustments during "Waiting for guest" from unmuting the TV
+                    setVolume(payload, useAppStore.getState().isPlaying);
                     break;
 
                 case 'SET_MUTE':
-                    if (payload) mutePlayer();
-                    else unmutePlayer();
+                    setUserMuted(payload);
                     break;
 
                 case 'SYNC_QUEUE':
@@ -178,6 +179,12 @@ export const usePlayerSync = (role = 'host', { onSongEnded } = {}) => {
                     setCountdownPaused(paused || false);
                     setMicAttemptHint(micHint || null);
                     if (syncQueue) useAppStore.getState().reorderQueue(syncQueue);
+
+                    // Sync volume state
+                    if (typeof payload.volume === 'number') setVolume(payload.volume, playing);
+                    if (typeof payload.isMuted === 'boolean') {
+                        setUserMuted(payload.isMuted);
+                    }
                     break;
                 }
             }
@@ -203,6 +210,22 @@ export const usePlayerSync = (role = 'host', { onSongEnded } = {}) => {
         };
     }, [role, getChannel, setCurrentSong, setIsPlaying, setWaitingForGuest, setWaitCountdown, setCountdownPaused, setMicAttemptHint, triggerRestart, sendMessage]);
 
+    // [New] Resume playback when waitingForGuest ends (TV Side)
+    // This fixes the issue where TV stays paused/muted after invitation
+    const prevWaitingProjectionRef = useRef(false);
+    useEffect(() => {
+        if (role !== 'projection') return;
+
+        // If we transitioned from Waiting (true) -> Not Waiting (false)
+        if (prevWaitingProjectionRef.current && !waitingForGuest) {
+            if (isPlaying && isPlayerReady()) {
+                unmutePlayer();
+                playPlayer();
+            }
+        }
+        prevWaitingProjectionRef.current = waitingForGuest;
+    }, [role, waitingForGuest, isPlaying]);
+
     // ========== HOST ROLE ==========
 
     // Listen for REQUEST_SYNC and SYNC_TIME from projection
@@ -223,6 +246,8 @@ export const usePlayerSync = (role = 'host', { onSongEnded } = {}) => {
                     paused: store.countdownPaused,
                     micHint: store.micAttemptHint,
                     queue: store.queue,
+                    volume: store.volume,
+                    isMuted: store.isMuted
                 });
             } else if (type === 'SYNC_TIME') {
                 updateRemoteState(payload.time, payload.duration);
@@ -308,6 +333,28 @@ export const usePlayerSync = (role = 'host', { onSongEnded } = {}) => {
         if (role !== 'host') return;
         sendMessage('MIC_ATTEMPT', micAttemptHint);
     }, [role, micAttemptHint, sendMessage]);
+
+    // [New] Send Volume
+    const volume = useAppStore((s) => s.volume);
+    const isMuted = useAppStore((s) => s.isMuted);
+
+    // Debounce/check previous for volume
+    const prevVolumeRef = useRef(100);
+    useEffect(() => {
+        if (role !== 'host') return;
+        if (volume === prevVolumeRef.current) return;
+        prevVolumeRef.current = volume;
+        sendMessage('SET_VOLUME', volume);
+    }, [role, volume, sendMessage]);
+
+    // Check previous for mute
+    const prevMuteRef = useRef(false);
+    useEffect(() => {
+        if (role !== 'host') return;
+        if (isMuted === prevMuteRef.current) return;
+        prevMuteRef.current = isMuted;
+        sendMessage('SET_MUTE', isMuted);
+    }, [role, isMuted, sendMessage]);
 
     // Send restart
     useEffect(() => {

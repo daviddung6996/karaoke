@@ -31,7 +31,6 @@ const LegacyBridge = () => {
         get(legacyQueueRef).then(async (snapshot) => {
             if (snapshot.exists()) {
                 const data = snapshot.val();
-                console.log('[LegacyBridge] Found existing legacy items on mount:', Object.keys(data).length);
 
                 // Process each existing item
                 for (const [key, val] of Object.entries(data)) {
@@ -52,9 +51,6 @@ const LegacyBridge = () => {
     }, []);
 
     const processLegacyItem = async (key, val) => {
-        // Deep log to see what exactly we are dealing with
-        console.log('[LegacyBridge] Processing item raw:', key, JSON.stringify(val));
-
         if (!val || typeof val !== 'object') {
             console.warn('[LegacyBridge] Invalid item format (not an object), removing:', key);
             await remove(ref(database, `queue/${key}`));
@@ -85,7 +81,6 @@ const LegacyBridge = () => {
 
             // 2. Remove from old queue immediately
             await remove(ref(database, `queue/${key}`));
-            console.log('[LegacyBridge] Successfully migrated and removed:', key);
         } catch (err) {
             console.error('[LegacyBridge] Failed to migrate:', err);
             // If it fails due to Firebase issues, we might not want to remove it yet?

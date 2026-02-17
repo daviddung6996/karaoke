@@ -112,34 +112,3 @@ export function generatePlayQueue(customerQueues) {
     // 4. Merge: Priority First, then Round Robin
     return [...prioritySongs, ...rrQueue];
 }
-
-/**
- * Merges the new calculated queue with the existing playState to preserve "Currently Playing" status
- * and avoid jumping around if possible.
- * 
- * @param {Array} currentPlayQueue - The existing queue from Firebase
- * @param {Array} newCalculatedQueue - The result of generatePlayQueue
- * @param {number} currentIndex - The current index in the playback
- */
-export function mergeQueues(currentPlayQueue, newCalculatedQueue, currentIndex) {
-    // Requirement: "Keep played songs (index < currentIndex)"
-    // Actually, "Keep history" might be complex if we want to reflect "Deletes".
-    // If a user deletes a song that was already played, do we remove it from history? 
-    // Usually history is immutable.
-
-    // Simpler approach for Phase 2:
-    // Just replace the entire queue. 
-    // The "Current Index" management is key.
-
-    // If we just replace the queue, the "currentIndex" pointer might point to a different song 
-    // if the queue length changes or items shift.
-
-    // But since we generate deterministically from customerQueues:
-    // If no songs are removed/added, the order is identical.
-    // If a song is added by a new customer -> it appears in current round or next round.
-
-    // We will trust the deterministic generation for now.
-    // The consuming app needs to handle "Current Song" robustly (by ID, not just index).
-
-    return newCalculatedQueue;
-}

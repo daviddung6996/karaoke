@@ -1,5 +1,5 @@
 import React from 'react';
-import { listenToNowPlaying, clearNowPlaying } from '../../services/firebaseQueueService';
+import { clearNowPlaying } from '../../services/firebaseQueueService';
 
 const SESSION_KEY = '__karaoke_session_active__';
 const CURRENT_SONG_KEY = '__karaoke_current_song__';
@@ -88,7 +88,6 @@ export function useSessionRestore(setCurrentSong, setIsPlaying, setQueue) { // A
 
     // Fresh session: clear everything
     if (!isRefresh) {
-      console.log('[useSessionRestore] Fresh session — clearing saved state');
       clearNowPlaying().catch(() => { });
       sessionStorage.removeItem(CURRENT_SONG_KEY);
       sessionStorage.removeItem(QUEUE_KEY);
@@ -96,24 +95,16 @@ export function useSessionRestore(setCurrentSong, setIsPlaying, setQueue) { // A
     }
 
     // F5 refresh: restore from sessionStorage (instant, synchronous)
-    console.log('[useSessionRestore] F5 refresh detected');
-
     const savedSong = restoreCurrentSongFromSession();
     if (savedSong) {
-      console.log('[useSessionRestore] Restored currentSong:', savedSong.title);
       setCurrentSong(savedSong);
       setIsPlaying(true);
       setIsRestoredSong(true);
-    } else {
-      console.log('[useSessionRestore] No saved currentSong found');
     }
 
     const savedQueue = restoreQueueFromSession();
     if (savedQueue && savedQueue.length > 0) {
-      console.log('[useSessionRestore] Restored queue items:', savedQueue.length);
       if (setQueue) setQueue(savedQueue);
-    } else {
-      console.log('[useSessionRestore] No saved queue found');
     }
 
   }, [isRefresh, setCurrentSong, setIsPlaying, setQueue]);

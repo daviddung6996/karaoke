@@ -13,8 +13,6 @@ export const useTTS = () => {
 
         if (!cleanText) return Promise.resolve();
 
-        console.log("TTS Announcing (Google):", cleanText);
-
         const speak = (text) => {
             return new Promise(async (resolve) => {
                 try {
