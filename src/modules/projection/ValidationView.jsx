@@ -146,8 +146,6 @@ const ValidationView = () => {
 
     // Auto-fullscreen ONLY if on a secondary screen (prevents fullscreening laptop)
     useEffect(() => {
-        if (document.fullscreenElement) return;
-
         const trySmartFullscreen = async () => {
             // Check if we're on a secondary screen
             if ('getScreenDetails' in window) {
@@ -156,11 +154,9 @@ const ValidationView = () => {
                     const current = details.currentScreen;
                     const isSecondary = details.screens.length > 1 && current !== details.screens.find(s => s.isPrimary);
 
-                    if (isSecondary) {
+                    if (isSecondary && !document.fullscreenElement) {
                         console.log('[TV Page] On secondary screen — requesting fullscreen');
                         document.documentElement.requestFullscreen().catch(() => { });
-                    } else {
-                        console.log('[TV Page] On primary screen — skipping fullscreen');
                     }
                 } catch {
                     console.log('[TV Page] Cannot detect screen — skipping fullscreen');
@@ -168,9 +164,14 @@ const ValidationView = () => {
             }
         };
 
-        // Delay check to let Window Management API settle
+        // Initial check
         setTimeout(trySmartFullscreen, 1000);
-    }, []);
+
+        // Re-check on song change (safety net)
+        if (currentSong?.videoId) {
+            setTimeout(trySmartFullscreen, 500);
+        }
+    }, [currentSong?.videoId]);
 
     // Auto-hide controls after 3s, show on mouse move (throttled)
     const resetHideTimer = useCallback(() => {
@@ -200,8 +201,9 @@ const ValidationView = () => {
             {/* Watchdog: Force Playback if Stuck */}
             <Watchdog />
 
-            {currentSong && (
-                <div className={`w-full h-full relative z-10 transition-opacity duration-500 ${isPlaying ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+            {/* Player Container - Always mounted to prevent fullscreen exit */}
+            <div className={`w-full h-full relative z-10 transition-opacity duration-500 ${currentSong && isPlaying ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                {currentSong ? (
                     <div className="w-full h-full relative">
                         <PlayerErrorBoundary videoId={currentSong.videoId}>
                             <YouTubePlayer
@@ -217,8 +219,8 @@ const ValidationView = () => {
                         <div className="absolute inset-0 z-10" />
                         <MarqueeOverlay />
                     </div>
-                </div>
-            )}
+                ) : <div className="w-full h-full" />}
+            </div>
 
             {/* Background Video — only mounted when visible to save GPU */}
             {(!currentSong || !isPlaying) && (

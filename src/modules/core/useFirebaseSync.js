@@ -1,192 +1,93 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from './store';
-import { listenToFirebaseQueue, removeFromFirebaseQueue, clearFirebaseQueue, pushToFirebaseQueue } from '../../services/firebaseQueueService';
+import { listenToFirebaseQueue, removeFromFirebaseQueue, clearFirebaseQueue } from '../../services/firebaseQueueService';
 
 export function useFirebaseSync(isRefresh) {
-    const addToQueue = useAppStore((s) => s.addToQueue);
-    const insertToQueue = useAppStore((s) => s.insertToQueue);
     const reorderQueue = useAppStore((s) => s.reorderQueue);
     const queue = useAppStore((s) => s.queue);
-    const knownIdsRef = useRef(new Set());
-    const isInitialLoadRef = useRef(true);
+
+    // We don't really need to track "knownIds" for de-duplication anymore if `playQueue` is fully regenerated.
+    // However, to avoid flickering, we still rely on reorderQueue.
+
     const [firebaseInitialized, setFirebaseInitialized] = useState(false);
-
-    // NOTE: isRefresh is passed from parent to ensure consistency
-
-    useEffect(() => {
-        // Populate known IDs from existing local queue (only on mount)
-        if (queue.length > 0) {
-            queue.forEach((item) => {
-                if (item.firebaseKey) knownIdsRef.current.add(item.firebaseKey);
-            });
-        }
-    }, []); // Only once on mount
+    const isInitialLoadRef = useRef(true);
 
     useEffect(() => {
         const unsubscribe = listenToFirebaseQueue((firebaseItems) => {
-            // On initial load
+            // firebaseItems is the Array from `playQueue` node
+
             if (isInitialLoadRef.current) {
                 isInitialLoadRef.current = false;
 
-                // Fresh session: clear old queue from Firebase, don't restore
-                if (!isRefresh) {
-                    console.log('[FirebaseSync] Fresh session — clearing old Firebase queue', { isRefresh });
-                    clearFirebaseQueue().catch(() => { });
-                    // Mark all existing items as known so they won't be re-added
-                    firebaseItems.forEach((item) => {
-                        if (item && item.id) knownIdsRef.current.add(item.id);
-                    });
-                    setFirebaseInitialized(true);
-                    return;
-                }
+                // On fresh start (not refresh), strict clear?
+                // The prompt says "Clear song queue and current song on a fresh start".
+                // But `firebaseQueueService` logic for `playQueue` is persistent.
+                // If we want a fresh start, we should explicitly clear Firebase? 
+                // No, "App Start" usually means *this client* started. The queue might be shared.
+                // If it's a shared queue (Karaoke), we probably WANT to see what's playing.
+                // But the user rule said "Clearing the song queue... on a fresh start".
+                // Let's assume that rule applied to the *session* state, not necessarily the shared backend.
+                // If I am the Host, maybe I should clear?
+                // Use caution: If I reload the Host page, I don't want to wipe the queue for everyone.
 
-                // F5 refresh: restore queue from Firebase (in correct order)
-                console.log('[FirebaseSync] F5 refresh — restoring queue from Firebase', { isRefresh, firebaseItemsCount: firebaseItems.length });
-
-                // Filter valid items only & rebuild from Firebase (maintain order)
-                const validItems = firebaseItems.filter(item => item && item.videoId && item.title);
-
-                // CRITICAL FIX: If Firebase is empty but we have local items (restored from SessionStorage),
-                // DO NOT wipe the queue. Instead, push local items to Firebase to sync them up.
-                if (validItems.length === 0) {
-                    const localQueue = useAppStore.getState().queue;
-                    if (localQueue.length > 0) {
-                        console.log('[FirebaseSync] Firebase empty, but found local items (session restored). Syncing local -> Firebase.');
-
-                        // Trigger background sync (fire & forget)
-                        // The listener will pick up the new items and update the queue naturally
-                        localQueue.forEach(async (item) => {
-                            try {
-                                await pushToFirebaseQueue({
-                                    ...item,
-                                    firebaseKey: null, // Force new key
-                                    id: null
-                                });
-                            } catch (err) {
-                                console.error('[FirebaseSync] Failed to re-sync item:', item.title, err);
-                            }
-                        });
-
-                        setFirebaseInitialized(true);
-                        return; // Skip reorderQueue to preserve local items until sync comes back
-                    }
-                }
-
-                console.log('[FirebaseSync] Valid items to restore:', validItems.length, 'of', firebaseItems.length);
-                console.log('[FirebaseSync] Items with timestamps:', validItems.map((v) => ({ title: v.title, addedAt: v.addedAt, addedBy: v.addedBy })));
-
-                // Convert all items to queue format
-                const restoredItems = validItems.map((item) => ({
-                    id: item.id,
-                    firebaseKey: item.id,
-                    videoId: item.videoId,
-                    title: item.title,
-                    cleanTitle: item.cleanTitle || item.title,
-                    artist: item.artist || '',
-                    addedBy: item.addedBy || 'Khách',
-                    thumbnail: item.thumbnail || '',
-                    source: item.source || 'web',
-                    priorityOrder: item.priorityOrder || 0,
-                }));
-
-                // Add all to knownIds
-                validItems.forEach((item) => knownIdsRef.current.add(item.id));
-
-                // Rebuild entire queue at once using reorderQueue (faster & preserves order)
-                console.log('[FirebaseSync] Rebuilding queue with', restoredItems.length, 'items');
-                reorderQueue(restoredItems);
-                setFirebaseInitialized(true);
-                return;
+                console.log('[FirebaseSync] Received playQueue from Firebase:', firebaseItems.length, 'items');
             }
 
-            // Subsequent updates: only add NEW items, but rebuild entire queue to maintain Firebase sort order
-            const newItems = [];
-            firebaseItems.forEach((item) => {
-                // Validate item integrity before adding
-                if (!item.videoId || !item.title) {
-                    console.warn('[FirebaseSync] Ignored invalid item from Firebase:', item);
-                    return;
-                }
+            // Map firebase items to App format
+            const validItems = firebaseItems || [];
 
-                if (!knownIdsRef.current.has(item.id)) {
-                    console.log('[FirebaseSync] NEW item from Firebase:', item.title, `(addedAt=${item.addedAt}, addedBy=${item.addedBy})`);
-                    knownIdsRef.current.add(item.id);
-                    newItems.push({
-                        id: item.id,
-                        firebaseKey: item.id,
-                        videoId: item.videoId,
-                        title: item.title,
-                        cleanTitle: item.cleanTitle,
-                        artist: item.artist,
-                        addedBy: item.addedBy,
-                        thumbnail: item.thumbnail,
-                        source: item.source || 'web',
-                        priorityOrder: item.priorityOrder || 0,
-                    });
-                }
-            });
+            const appQueueItems = validItems.map(item => ({
+                id: item.firebaseKey, // This is the unique ID (e.g. "custId_index" or real ID)
+                firebaseKey: item.firebaseKey,
+                videoId: item.videoId,
+                title: item.title,
+                cleanTitle: item.cleanTitle,
+                artist: item.artist,
+                addedBy: item.addedBy || item.customerName || 'Khách',
+                thumbnail: item.thumbnail,
+                source: item.source || 'web',
+                // Round-Robin specific info for UI (optional, but good to have)
+                customerId: item.customerId,
+                round: item.round,
+                isPriority: item.isPriority
+            }));
 
-            // If there are new items, rebuild entire queue from Firebase to maintain sort order
-            if (newItems.length > 0) {
-                console.log('[FirebaseSync] Rebuilding queue with', newItems.length, 'new items');
-                const updatedItems = firebaseItems
-                    .filter(item => item && item.videoId && item.title)
-                    .map((item) => ({
-                        id: item.id,
-                        firebaseKey: item.id,
-                        videoId: item.videoId,
-                        title: item.title,
-                        cleanTitle: item.cleanTitle,
-                        artist: item.artist,
-                        addedBy: item.addedBy,
-                        thumbnail: item.thumbnail,
-                        source: item.source || 'web',
-                        priorityOrder: item.priorityOrder || 0,
-                    }));
-                reorderQueue(updatedItems);
-            }
+            // We trust the order from Firebase (it is already sorted by Round-Robin)
+            reorderQueue(appQueueItems);
+            setFirebaseInitialized(true);
         });
 
         return () => unsubscribe();
-    }, []); // Only once on mount — never re-subscribe
+    }, []);
 
-    // Clean up Firebase when songs are removed locally
-    // IMPORTANT: Only cleanup AFTER Firebase has finished initial restore/clear + grace period
-    const prevQueueRef = useRef([]);
-    const cleanupReadyRef = useRef(false);
+    // Cleanup logic: If we remove an item LOCALLY, we must remove it from Firebase.
+    // In strict Redux/Flux, we should call the API *then* update state.
+    // But `useAppStore` updates state immediately (optimistic).
+    // So we watch for state changes and sync delete.
+    // BUT: `removeFromQueue` in Store updates `queue`.
+    // We need to compare previous queue with current.
+
+    const prevQueueRef = useRef(queue);
 
     useEffect(() => {
-        // Skip cleanup until Firebase initialization is complete
         if (!firebaseInitialized) {
-            console.log('[FirebaseSync] Skipping cleanup - Firebase not initialized yet');
             prevQueueRef.current = queue;
-            cleanupReadyRef.current = false;
             return;
         }
 
-        // Grace period: wait 1.5s after Firebase init before enabling cleanup
-        // This prevents deleting items that are being auto-played on F5 restore
-        if (!cleanupReadyRef.current) {
-            console.log('[FirebaseSync] Cleanup grace period - waiting 1.5s...');
-            const timer = setTimeout(() => {
-                cleanupReadyRef.current = true;
-                console.log('[FirebaseSync] Cleanup enabled');
-            }, 1500);
-            prevQueueRef.current = queue;
-            return () => clearTimeout(timer);
-        }
+        // Find items removed from local queue
+        const prevKeys = new Set(prevQueueRef.current.map(i => i.firebaseKey).filter(Boolean));
+        const currentKeys = new Set(queue.map(i => i.firebaseKey).filter(Boolean));
 
-        const prevKeys = new Set(prevQueueRef.current.map((q) => q.firebaseKey).filter(Boolean));
-        const currentKeys = new Set(queue.map((q) => q.firebaseKey).filter(Boolean));
-
-        prevKeys.forEach((key) => {
+        for (const key of prevKeys) {
             if (!currentKeys.has(key)) {
-                // knownIdsRef.current.delete(key); // Don't forget this ID, even if removed from queue, to prevent re-adding from stale snapshots
-                console.log('[FirebaseSync] Removing from Firebase:', key);
-                removeFromFirebaseQueue(key).catch(() => { });
+                console.log('[FirebaseSync] Item removed locally, syncing to Firebase:', key);
+                // remove from Firebase
+                removeFromFirebaseQueue(key).catch(err => console.error("Remove failed", err));
             }
-        });
+        }
 
         prevQueueRef.current = queue;
     }, [queue, firebaseInitialized]);
 }
+

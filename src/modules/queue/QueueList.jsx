@@ -16,10 +16,11 @@ const QueueItem = ({ item, index, onRemove, onPlay, onInvite, isFirst, queueMode
             id={item.id}
             dragListener={false}
             dragControls={dragControls}
+            layout="position"
             className="relative"
             whileDrag={{ scale: 1.02 }}
         >
-            <Card className="flex flex-col gap-2 p-2 hover:bg-slate-50 transition-all border-0 shadow-sm relative group rounded-lg select-none">
+            <Card className="flex flex-col gap-2 p-2 border-0 shadow-sm relative group rounded-lg select-none">
                 <div className="flex items-start gap-3">
                     <div
                         className="text-slate-300 mt-1 cursor-grab active:cursor-grabbing hover:text-slate-500 transition-colors touch-none"
@@ -29,14 +30,24 @@ const QueueItem = ({ item, index, onRemove, onPlay, onInvite, isFirst, queueMode
                     </div>
                     <div className="flex-1 min-w-0">
                         <h3 className="font-bold text-slate-800 text-sm leading-snug truncate uppercase tracking-tight" title={item.title}>{item.title || 'Không có tiêu đề'}</h3>
-                        <div className="flex items-center gap-2 mt-1">
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
                             <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 uppercase tracking-wider">{item.addedBy}</span>
+                            {item.isPriority && (
+                                <span className="text-[10px] font-bold text-white bg-red-500 px-2 py-0.5 rounded border border-red-600 uppercase tracking-wider animate-pulse">
+                                    Ưu Tiên
+                                </span>
+                            )}
+                            {item.round && !item.isPriority && (
+                                <span className="text-[10px] font-bold text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100 uppercase tracking-wider">
+                                    Vòng {item.round}
+                                </span>
+                            )}
                         </div>
                     </div>
 
                     <button
                         onClick={() => onRemove(item.id)}
-                        className="text-slate-300 hover:text-red-500 transition-colors p-1 rounded-md opacity-0 group-hover:opacity-100 cursor-pointer active:scale-90"
+                        className="text-slate-300 hover:text-red-500 transition-colors p-1 rounded-md cursor-pointer active:scale-90"
                         title="Xóa"
                     >
                         <Trash2 size={16} />
@@ -68,14 +79,25 @@ const QueueItem = ({ item, index, onRemove, onPlay, onInvite, isFirst, queueMode
 const QueueList = ({ onReAnnounce }) => {
     const { queue, removeFromQueue, currentSong, setCurrentSong, setIsPlaying, isPlaying, reorderQueue, queueMode, invitedSongId, setInvitedSongId, waitingForGuest } = useAppStore();
     const [showClearModal, setShowClearModal] = useState(false);
+    const [songToDelete, setSongToDelete] = useState(null);
 
     const handleRemove = (itemId) => {
-        // If deleting the currently playing song, clear currentSong to show BG video
-        if (currentSong?.id === itemId) {
+        const item = queue.find(i => i.id === itemId);
+        if (item) {
+            setSongToDelete(item);
+        }
+    };
+
+    const confirmRemoveSong = () => {
+        if (!songToDelete) return;
+
+        // If deleting the currently playing song (rare case for this button), clear currentSong
+        if (currentSong?.id === songToDelete.id) {
             setCurrentSong(null);
             setIsPlaying(false);
         }
-        removeFromQueue(itemId);
+        removeFromQueue(songToDelete.id);
+        setSongToDelete(null);
     };
 
     const handlePlay = (item) => {
@@ -213,53 +235,47 @@ const QueueList = ({ onReAnnounce }) => {
 
             {/* Clear Queue Confirmation Modal */}
             {showClearModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4">
-                    <motion.div
-                        initial={{ scale: 0.95, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        exit={{ scale: 0.95, opacity: 0 }}
-                        className="bg-white rounded-2xl border border-slate-200 w-full max-w-sm overflow-hidden shadow-xl"
-                    >
-                        {/* Header */}
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 animate-in fade-in duration-200">
+                    <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl transform transition-all scale-100">
                         <div className="p-4 border-b border-slate-100 bg-red-50 flex justify-between items-center">
                             <h3 className="text-lg font-black text-red-600 uppercase tracking-tighter">Xóa Hàng Chờ?</h3>
-                            <button
-                                onClick={() => setShowClearModal(false)}
-                                className="p-2 hover:bg-red-100 rounded-full transition-colors"
-                            >
-                                <X size={20} className="text-red-500" />
-                            </button>
+                            <button onClick={() => setShowClearModal(false)} className="p-2 hover:bg-red-100 rounded-full transition-colors"><X size={20} className="text-red-500" /></button>
                         </div>
-
-                        {/* Content */}
-                        <div className="p-6 space-y-4">
-                            <p className="text-slate-700 font-bold">
-                                Bạn chắc chắn muốn xóa tất cả <span className="text-red-600">{queue.length}</span> bài trong hàng chờ?
-                            </p>
-                            <p className="text-sm text-slate-500">
-                                ⚠️ Hành động này không thể hoàn tác
-                            </p>
+                        <div className="p-6">
+                            <p className="text-slate-700 font-bold mb-1">Bạn muốn xóa tất cả <span className="text-red-600">{queue.length}</span> bài hát?</p>
+                            <p className="text-xs text-slate-500 font-medium">Hành động này không thể hoàn tác.</p>
                         </div>
-
-                        {/* Actions */}
                         <div className="p-4 bg-slate-50 flex gap-3 border-t border-slate-100">
-                            <Button
-                                onClick={() => setShowClearModal(false)}
-                                variant="ghost"
-                                size="lg"
-                                className="text-slate-600 hover:text-slate-800 font-bold flex-1"
-                            >
-                                Hủy
-                            </Button>
-                            <Button
-                                onClick={handleClearQueue}
-                                size="lg"
-                                className="bg-red-600 hover:bg-red-700 text-white font-black flex-1"
-                            >
-                                Xóa Tất Cả
-                            </Button>
+                            <Button onClick={() => setShowClearModal(false)} variant="ghost" className="flex-1 font-bold text-slate-600">Hủy</Button>
+                            <Button onClick={handleClearQueue} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-black">Xóa Tất Cả</Button>
                         </div>
-                    </motion.div>
+                    </div>
+                </div>
+            )}
+
+            {/* Single Song Delete Modal */}
+            {songToDelete && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 animate-in fade-in duration-200">
+                    <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl transform transition-all scale-100">
+                        <div className="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                            <h3 className="text-lg font-black text-slate-800 uppercase tracking-tighter">Xác Nhận Xóa</h3>
+                            <button onClick={() => setSongToDelete(null)} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X size={20} className="text-slate-500" /></button>
+                        </div>
+                        <div className="p-6">
+                            <p className="text-slate-600 font-medium mb-2">Bạn có chắc muốn xóa bài hát này?</p>
+                            <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                                <h4 className="font-black text-slate-800 text-sm line-clamp-2">{songToDelete.title}</h4>
+                                <div className="flex items-center gap-2 mt-1">
+                                    <span className="text-[10px] font-bold text-slate-500 uppercase">Hát:</span>
+                                    <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100 uppercase">{songToDelete.addedBy}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="p-4 bg-slate-50 flex gap-3 border-t border-slate-100">
+                            <Button onClick={() => setSongToDelete(null)} variant="ghost" className="flex-1 font-bold text-slate-600">Giữ Lại</Button>
+                            <Button onClick={confirmRemoveSong} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-black">Xóa Bài</Button>
+                        </div>
+                    </div>
                 </div>
             )}
         </div>

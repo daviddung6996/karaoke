@@ -20,6 +20,7 @@ import { useTVWindow } from './modules/core/useTVWindow';
 import { useFirebaseSync } from './modules/core/useFirebaseSync';
 import { useSessionRestore, saveCurrentSongToSession } from './modules/core/useSessionRestore';
 import { setNowPlaying, clearNowPlaying, removeFromFirebaseQueue } from './services/firebaseQueueService';
+import LegacyBridge from './modules/core/LegacyBridge';
 
 const ControlPanel = () => {
 
@@ -36,13 +37,6 @@ const ControlPanel = () => {
       saveQueueToSession(queue);
     });
   }, [queue]);
-
-  // Define handleSongEnd before usePlayerSync to avoid dependency cycles if we were to pass it
-  // But wait, handleNext depends on Queue. Queue changes. 
-  // We can use a ref or just rely on the latest closure if usePlayerSync updates its listener.
-  // In usePlayerSync, we added `onSongEnded` to the dependency array of the effect.
-  // So if handleSongEnd changes, the effect re-subscribes. 
-  // This is fine.
 
   const handleNext = () => {
     if (queue.length > 0) {
@@ -361,6 +355,7 @@ const ControlPanel = () => {
 
   return (
     <div className="flex flex-col lg:flex-row h-screen font-sans p-2 gap-4 bg-slate-100">
+      <LegacyBridge />
       {/* Left Panel: Queue */}
       <div
         className={getPanelFlex('left')}
@@ -393,7 +388,10 @@ const ControlPanel = () => {
         onMouseEnter={() => setActivePanel('center')}
       >
         <div className="flex justify-between items-center bg-white p-3 rounded-xl shadow-sm border border-slate-200 mb-0">
-          <h1 className="text-2xl font-black text-slate-800 tracking-tighter uppercase">KARAOKE SÁU NHÀN</h1>
+          <div className="flex items-center gap-3">
+            <img src="/logo.svg" alt="Logo" className="w-12 h-12 rounded-xl shadow-sm bg-white" />
+            <h1 className="text-2xl font-black text-slate-800 tracking-tighter uppercase">KARAOKE SÁU NHÀN</h1>
+          </div>
 
           <DisplayModeToggle openTV={openTV} closeTV={closeTV} isTVOpen={isTVOpen} />
         </div>
