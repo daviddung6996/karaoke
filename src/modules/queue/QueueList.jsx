@@ -1,14 +1,44 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useAppStore } from '../core/store';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
-import { Trash2, GripVertical, X } from 'lucide-react';
+import { Trash2, GripVertical, X, ArrowUpCircle } from 'lucide-react';
 import { AnimatePresence, motion, Reorder, useDragControls } from 'framer-motion';
 
+// Module-level ref for Now Playing card element (used by QueueItem to detect overlap)
+let _nowPlayingEl = null;
 
 
-const QueueItem = ({ item, index, onRemove, onPlay, onInvite, isFirst, queueMode, invitedSongId }) => {
+const QueueItem = ({ item, index, onRemove, onPlay, onInvite, isFirst, queueMode, invitedSongId, onDragOverNowPlaying, onDropOnNowPlaying }) => {
     const dragControls = useDragControls();
+    const wasOverRef = useRef(false);
+
+    const checkOverlap = (event) => {
+        if (!_nowPlayingEl) return false;
+        const rect = _nowPlayingEl.getBoundingClientRect();
+        const y = event.clientY ?? event.touches?.[0]?.clientY ?? 0;
+        const x = event.clientX ?? event.touches?.[0]?.clientX ?? 0;
+        return y >= rect.top && y <= rect.bottom && x >= rect.left && x <= rect.right;
+    };
+
+    const handleDrag = (event) => {
+        const isOver = checkOverlap(event);
+        if (isOver !== wasOverRef.current) {
+            wasOverRef.current = isOver;
+            onDragOverNowPlaying?.(isOver);
+        }
+    };
+
+    const handleDragEnd = (event) => {
+        if (wasOverRef.current) {
+            wasOverRef.current = false;
+            onDragOverNowPlaying?.(false);
+            onDropOnNowPlaying?.(item);
+        } else {
+            wasOverRef.current = false;
+            onDragOverNowPlaying?.(false);
+        }
+    };
 
     return (
         <Reorder.Item
@@ -19,6 +49,8 @@ const QueueItem = ({ item, index, onRemove, onPlay, onInvite, isFirst, queueMode
             layout="position"
             className="relative"
             whileDrag={{ scale: 1.02 }}
+            onDrag={handleDrag}
+            onDragEnd={handleDragEnd}
         >
             <Card className="flex flex-col gap-2 p-2 border-0 shadow-sm relative group rounded-lg select-none">
                 <div className="flex items-start gap-3">
@@ -77,9 +109,12 @@ const QueueItem = ({ item, index, onRemove, onPlay, onInvite, isFirst, queueMode
 };
 
 const QueueList = ({ onReAnnounce }) => {
-    const { queue, removeFromQueue, currentSong, setCurrentSong, setIsPlaying, isPlaying, reorderQueue, queueMode, invitedSongId, setInvitedSongId, waitingForGuest } = useAppStore();
+    const { queue, removeFromQueue, currentSong, setCurrentSong, setIsPlaying, isPlaying, reorderQueue, queueMode, invitedSongId, setInvitedSongId, waitingForGuest, setWaitingForGuest } = useAppStore();
     const [showClearModal, setShowClearModal] = useState(false);
     const [songToDelete, setSongToDelete] = useState(null);
+    const [songToReplace, setSongToReplace] = useState(null);
+    const [isDragOverNowPlaying, setIsDragOverNowPlaying] = useState(false);
+    const nowPlayingRef = useRef(null);
 
     const handleRemove = (itemId) => {
         const item = queue.find(i => i.id === itemId);
@@ -112,15 +147,40 @@ const QueueList = ({ onReAnnounce }) => {
 
     const handleClearQueue = async () => {
         try {
-            // Import clearFirebaseQueue
             const { clearFirebaseQueue } = await import('../../services/firebaseQueueService');
             await clearFirebaseQueue();
-            // Also clear local queue
             queue.forEach((item) => removeFromQueue(item.id));
             setShowClearModal(false);
         } catch (err) {
             console.error('[QueueList] Clear queue failed:', err);
         }
+    };
+
+    // --- Drag-to-Replace handlers ---
+    // Keep _nowPlayingEl in sync with ref
+    const setNowPlayingRef = (el) => {
+        nowPlayingRef.current = el;
+        _nowPlayingEl = el;
+    };
+
+    const handleDragOverNowPlaying = (isOver) => {
+        setIsDragOverNowPlaying(isOver);
+    };
+
+    const handleDropOnNowPlaying = (item) => {
+        setSongToReplace(item);
+    };
+
+    const confirmReplaceSong = () => {
+        if (!songToReplace) return;
+        // Stage the song: skip TTS announcement & waiting, go straight to paused/ready
+        const stagedSong = { ...songToReplace, isStaged: true };
+        setIsPlaying(false);
+        setWaitingForGuest(false);
+        setInvitedSongId(null);
+        setCurrentSong(stagedSong);
+        removeFromQueue(songToReplace.id);
+        setSongToReplace(null);
     };
 
     return (
@@ -130,6 +190,7 @@ const QueueList = ({ onReAnnounce }) => {
                 <AnimatePresence>
                     {currentSong && (
                         <motion.div
+                            ref={setNowPlayingRef}
                             initial={{ opacity: 0, y: -20 }}
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0 }}
@@ -145,8 +206,18 @@ const QueueList = ({ onReAnnounce }) => {
                                 </h2>
                             </div>
 
-                            <Card className="p-3 bg-indigo-600 border-0 relative rounded-xl text-white shadow-sm overflow-hidden">
+                            <Card className={`p-3 bg-indigo-600 border-0 relative rounded-xl text-white shadow-sm overflow-hidden transition-all duration-200 ${isDragOverNowPlaying ? 'ring-3 ring-amber-400 ring-offset-2 scale-[1.02] bg-indigo-500' : ''}`}>
                                 <div className="absolute top-0 right-0 w-20 h-20 bg-white/10 rounded-full -mr-10 -mt-10"></div>
+
+                                {/* Drag-over overlay hint */}
+                                {isDragOverNowPlaying && (
+                                    <div className="absolute inset-0 bg-amber-400/20 z-20 flex items-center justify-center rounded-xl">
+                                        <div className="flex items-center gap-2 bg-amber-500 text-white px-4 py-2 rounded-lg shadow-lg">
+                                            <ArrowUpCircle size={18} />
+                                            <span className="text-xs font-black uppercase tracking-wider">Thả để thay thế</span>
+                                        </div>
+                                    </div>
+                                )}
 
                                 <div className="flex items-center gap-3 relative z-10">
                                     {/* Animated Icon */}
@@ -225,6 +296,8 @@ const QueueList = ({ onReAnnounce }) => {
                                     isFirst={!currentSong && index === 0}
                                     queueMode={queueMode}
                                     invitedSongId={invitedSongId}
+                                    onDragOverNowPlaying={handleDragOverNowPlaying}
+                                    onDropOnNowPlaying={handleDropOnNowPlaying}
                                 />
                             ))}
                         </AnimatePresence>
@@ -273,6 +346,56 @@ const QueueList = ({ onReAnnounce }) => {
                         <div className="p-4 bg-slate-50 flex gap-3 border-t border-slate-100">
                             <Button onClick={() => setSongToDelete(null)} variant="ghost" className="flex-1 font-bold text-slate-600">Giữ Lại</Button>
                             <Button onClick={confirmRemoveSong} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-black">Xóa Bài</Button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Replace Song Confirmation Modal */}
+            {songToReplace && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 animate-in fade-in duration-200">
+                    <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl transform transition-all scale-100">
+                        <div className="p-4 border-b border-slate-100 bg-amber-50 flex justify-between items-center">
+                            <h3 className="text-lg font-black text-amber-700 uppercase tracking-tighter">Thay Thế Bài Hát?</h3>
+                            <button onClick={() => setSongToReplace(null)} className="p-2 hover:bg-amber-100 rounded-full transition-colors"><X size={20} className="text-amber-600" /></button>
+                        </div>
+                        <div className="p-6 space-y-3">
+                            <p className="text-slate-600 font-medium text-sm">Bạn muốn thay thế bài đang {isPlaying ? 'phát' : 'sẵn sàng'}?</p>
+
+                            {/* Current song */}
+                            <div className="bg-red-50 p-3 rounded-lg border border-red-200">
+                                <div className="flex items-center gap-1.5 mb-1">
+                                    <span className="text-[9px] font-black text-red-500 uppercase tracking-wider">Bỏ</span>
+                                </div>
+                                <h4 className="font-black text-slate-800 text-sm line-clamp-1">{currentSong?.title}</h4>
+                                <div className="flex items-center gap-2 mt-1">
+                                    <span className="text-[10px] font-bold text-slate-500 uppercase">Hát:</span>
+                                    <span className="text-[10px] font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded border border-red-200 uppercase">{currentSong?.addedBy}</span>
+                                </div>
+                            </div>
+
+                            {/* Arrow */}
+                            <div className="flex justify-center">
+                                <div className="w-6 h-6 rounded-full bg-amber-100 flex items-center justify-center">
+                                    <ArrowUpCircle size={14} className="text-amber-600 rotate-180" />
+                                </div>
+                            </div>
+
+                            {/* Replacement song */}
+                            <div className="bg-green-50 p-3 rounded-lg border border-green-200">
+                                <div className="flex items-center gap-1.5 mb-1">
+                                    <span className="text-[9px] font-black text-green-600 uppercase tracking-wider">Thay bằng</span>
+                                </div>
+                                <h4 className="font-black text-slate-800 text-sm line-clamp-1">{songToReplace.title}</h4>
+                                <div className="flex items-center gap-2 mt-1">
+                                    <span className="text-[10px] font-bold text-slate-500 uppercase">Hát:</span>
+                                    <span className="text-[10px] font-bold text-green-600 bg-green-100 px-2 py-0.5 rounded border border-green-200 uppercase">{songToReplace.addedBy}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="p-4 bg-slate-50 flex gap-3 border-t border-slate-100">
+                            <Button onClick={() => setSongToReplace(null)} variant="ghost" className="flex-1 font-bold text-slate-600">Hủy</Button>
+                            <Button onClick={confirmReplaceSong} className="flex-1 bg-amber-500 hover:bg-amber-600 text-white font-black">Thay Thế</Button>
                         </div>
                     </div>
                 </div>

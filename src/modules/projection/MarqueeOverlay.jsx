@@ -75,33 +75,33 @@ const MarqueeOverlay = React.memo(() => {
                 transition: 'opacity 0.5s ease, transform 0.5s ease',
             }}
         >
-            <div className="flex items-stretch gap-0 max-w-[90vw] rounded-2xl overflow-hidden" style={{ boxShadow: '0 8px 32px rgba(0,0,0,0.6)' }}>
+            <div className="flex items-stretch gap-0 max-w-[95vw] rounded-2xl overflow-hidden" style={{ boxShadow: '0 8px 32px rgba(0,0,0,0.6)' }}>
                 {/* Current song */}
-                <div className="flex items-center gap-4 bg-black/80 px-7 py-4 min-w-0">
-                    <div className="w-12 h-12 rounded-xl bg-yellow-400/20 flex items-center justify-center flex-shrink-0">
-                        <Mic size={24} className="text-yellow-400" />
+                <div className="flex items-center gap-5 bg-black/80 px-8 py-5 min-w-0">
+                    <div className="w-14 h-14 rounded-xl bg-yellow-400/20 flex items-center justify-center flex-shrink-0">
+                        <Mic size={32} className="text-yellow-400" />
                     </div>
                     <div className="min-w-0">
-                        <div className="text-yellow-400 text-xs font-bold uppercase tracking-widest leading-none mb-1.5">ĐANG HÁT</div>
-                        <div className="text-white font-black text-2xl uppercase truncate max-w-[35vw] leading-tight">{songTitle}</div>
-                        <div className="text-white/60 text-sm font-bold uppercase tracking-wide mt-0.5">{singer}</div>
+                        <div className="text-yellow-400 text-sm font-bold uppercase tracking-widest leading-none mb-2">ĐANG HÁT</div>
+                        <div className="text-white font-black text-3xl uppercase max-w-[70vw] leading-tight">{songTitle}</div>
+                        <div className="text-yellow-300 text-2xl font-bold uppercase tracking-wide mt-1">{singer}</div>
                     </div>
                 </div>
 
                 {/* Next song */}
-                <div className="flex items-center gap-4 bg-indigo-900/80 px-7 py-4 min-w-0">
-                    <div className="w-12 h-12 rounded-xl bg-indigo-400/20 flex items-center justify-center flex-shrink-0">
-                        <SkipForward size={24} className="text-indigo-300" />
+                <div className="flex items-center gap-5 bg-indigo-900/80 px-8 py-5 min-w-0">
+                    <div className="w-14 h-14 rounded-xl bg-indigo-400/20 flex items-center justify-center flex-shrink-0">
+                        <SkipForward size={32} className="text-indigo-300" />
                     </div>
                     <div className="min-w-0">
-                        <div className="text-indigo-300 text-xs font-bold uppercase tracking-widest leading-none mb-1.5">TIẾP THEO</div>
+                        <div className="text-indigo-300 text-sm font-bold uppercase tracking-widest leading-none mb-2">TIẾP THEO</div>
                         {nextVideoId ? (
                             <>
-                                <div className="text-white font-black text-2xl uppercase truncate max-w-[30vw] leading-tight">{nextTitle}</div>
-                                <div className="text-white/60 text-sm font-bold uppercase tracking-wide mt-0.5">{nextAddedBy || 'Khách'}</div>
+                                <div className="text-white font-black text-3xl uppercase max-w-[70vw] leading-tight">{nextTitle}</div>
+                                <div className="text-cyan-300 text-2xl font-bold uppercase tracking-wide mt-1">{nextAddedBy || 'Khách'}</div>
                             </>
                         ) : (
-                            <div className="text-white/50 font-bold text-base uppercase">Chúc bà con hát vui vẻ!</div>
+                            <div className="text-white/50 font-bold text-lg uppercase">Chúc bà con hát vui vẻ!</div>
                         )}
                     </div>
                 </div>

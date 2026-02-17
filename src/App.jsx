@@ -132,6 +132,7 @@ const ControlPanel = () => {
     // we simply un-stage it and start playing/announcing.
     if (currentSong?.isStaged) {
       const activeSong = { ...currentSong, isStaged: false };
+      setAnnouncedSongId(activeSong.id); // Skip TTS — play immediately
       setCurrentSong(activeSong);
       setIsPlaying(true);
       return;
