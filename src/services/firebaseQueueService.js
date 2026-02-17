@@ -55,11 +55,24 @@ export async function pushToFirebaseQueue(song) {
     const now = Date.now();
 
     if (!customerData) {
+        // Determine current round from existing playQueue
+        let startRound = 1;
+        const pqSnapshot = await get(getPlayQueueRef());
+        const currentPlayQueue = pqSnapshot.val();
+        if (currentPlayQueue) {
+            const items = Array.isArray(currentPlayQueue) ? currentPlayQueue : Object.values(currentPlayQueue);
+            const firstNormal = items.find(item => !item.isPriority);
+            if (firstNormal && firstNormal.round) {
+                startRound = firstNormal.round;
+            }
+        }
+
         // New customer
         customerData = {
             name: song.addedBy || 'Khách mới',
             firstOrderTime: now,
-            songs: {} // Use map for easy deletion by ID, or array? Array is easier for logic. Let's use Object with push keys.
+            startRound: startRound,
+            songs: {}
         };
     }
 
@@ -90,9 +103,12 @@ export async function pushToFirebaseQueue(song) {
     // We do sequential updates to ensure consistency is acceptable
     await set(newSongRef, newSongData);
 
-    if (!customerData.firstOrderTime) {
+    const existingSnapshot = await get(customerRef);
+    const existingData = existingSnapshot.val();
+    if (!existingData || !existingData.firstOrderTime) {
         await update(customerRef, {
-            firstOrderTime: now,
+            firstOrderTime: customerData.firstOrderTime || now,
+            startRound: customerData.startRound || 1,
             name: song.addedBy
         });
     } else {

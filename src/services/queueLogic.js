@@ -82,31 +82,29 @@ export function generatePlayQueue(customerQueues) {
     }));
     customers.sort((a, b) => (a.firstOrderTime || 0) - (b.firstOrderTime || 0));
 
-    let round = 1;
-    let hasSongs = true;
-    const customerIndices = {};
-    customers.forEach(c => customerIndices[c.id] = 0);
+    // Calculate max round needed (accounting for startRound offset per customer)
+    const maxRound = Math.max(
+        ...customers.map(c => ((c.startRound || 1) - 1) + (c.songs || []).length),
+        0
+    );
 
-    while (hasSongs) {
-        hasSongs = false;
+    for (let round = 1; round <= maxRound; round++) {
         for (const customer of customers) {
+            const startRound = customer.startRound || 1;
+            const songIndex = round - startRound;
             const songs = customer.songs || [];
-            const index = customerIndices[customer.id];
-            if (index < songs.length) {
-                const song = songs[index];
+            if (songIndex >= 0 && songIndex < songs.length) {
+                const song = songs[songIndex];
                 rrQueue.push({
                     ...song,
                     customerId: customer.id,
                     customerName: customer.name,
                     round: round,
-                    originalSongIndex: index,
-                    firebaseKey: song.id || song.firebaseKey || `${customer.id}_${index}`
+                    originalSongIndex: songIndex,
+                    firebaseKey: song.id || song.firebaseKey || `${customer.id}_${songIndex}`
                 });
-                customerIndices[customer.id]++;
-                hasSongs = true;
             }
         }
-        if (hasSongs) round++;
     }
 
     // 4. Merge: Priority First, then Round Robin
