@@ -87,28 +87,19 @@ const SearchBar = ({ isExpanded = false }) => {
 
     // Step 1: User clicks add -> Open Modal
     const handleAddClick = (track) => {
+        if (!track || !track.title) return;
         setSelectedTrack(track);
         setShowModal(true);
     };
 
     // Step 2: User confirms name -> Add to Queue
-    const handleConfirmAdd = (guestName) => {
+    const handleConfirmAdd = async (guestName, isPriority = false) => {
         if (!selectedTrack) return;
 
+        console.log('[SearchBar] handleConfirmAdd called:', { guestName, isPriority, title: selectedTrack.title });
 
-
-        const queueId = Date.now().toString();
         const rawTitle = selectedTrack.title;
         const rawArtist = selectedTrack.artist;
-
-        // Analytics / History
-        // Dynamic import to avoid circular dep or heavy load if needed, but standard import is fine.
-        import('../../services/smartSuggestionService').then(({ recordPlay, cacheYoutubeId }) => {
-            recordPlay(rawTitle, rawArtist);
-            if (selectedTrack.videoId) {
-                cacheYoutubeId(rawTitle, rawArtist, selectedTrack.videoId);
-            }
-        });
 
         // Determine Clean Title for TTS
         let displayTitle = rawTitle;
@@ -118,30 +109,79 @@ const SearchBar = ({ isExpanded = false }) => {
             displayTitle = cleanYoutubeTitle(rawTitle);
         }
 
-        // 1. Add immediately (Optimistic UI)
-        addToQueue({
-            id: queueId,
-            videoId: selectedTrack.videoId,
-            title: rawTitle, // Keep original title for reference? Or display?
-            // User said: queue.push({ cleanTitle: ... })
-            cleanTitle: displayTitle,
-            artist: rawArtist,
-            addedBy: guestName,
-            thumbnail: selectedTrack.thumbnail,
-        });
+        // 1. Push to Firebase FIRST (priority for sync)
+        let firebaseKey = null;
+        try {
+            const { pushToFirebaseQueue } = await import('../../services/firebaseQueueService');
+            const result = await pushToFirebaseQueue({
+                videoId: selectedTrack.videoId,
+                title: rawTitle,
+                cleanTitle: displayTitle,
+                artist: rawArtist,
+                addedBy: guestName,
+                thumbnail: selectedTrack.thumbnail,
+                isPriority: isPriority
+            });
+            firebaseKey = result?.key; // Get Firebase key
+        } catch (err) {
+            console.warn('Firebase push failed, will add locally:', err);
+            // If Firebase fails, use timestamp as fallback
+            firebaseKey = Date.now().toString();
+        }
+
+        // 2. Add to local queue with Firebase key
+        // NOTE: Do NOT call addToQueue here if Firebase succeeded!
+        // useFirebaseSync will pick it up from Firebase listener
+        if (firebaseKey && firebaseKey !== Date.now().toString()) {
+            // Firebase key means it came from Firebase, wait for sync
+            console.log('[SearchBar] Waiting for Firebase sync instead of adding locally...');
+        } else {
+            // Only add locally if Firebase failed (fallback mode)
+            addToQueue({
+                id: firebaseKey,
+                firebaseKey: null, // Local-only, no Firebase key
+                videoId: selectedTrack.videoId,
+                title: rawTitle,
+                cleanTitle: displayTitle,
+                artist: rawArtist,
+                addedBy: guestName,
+                thumbnail: selectedTrack.thumbnail,
+            });
+        }
 
         setShowModal(false);
         setSelectedTrack(null);
 
-        // 2. Background: Clean Title
+        // 3. Analytics / History
+        import('../../services/smartSuggestionService').then(({ recordPlay, cacheYoutubeId }) => {
+            recordPlay(rawTitle, rawArtist);
+            if (selectedTrack.videoId) {
+                cacheYoutubeId(rawTitle, rawArtist, selectedTrack.videoId);
+            }
+        });
+
+        // 4. Background: Clean Title via Gemini
         import('../core/geminiService').then(({ cleanSongTitle }) => {
             cleanSongTitle(rawTitle).then(cleaned => {
-                if (cleaned) {
+                if (cleaned && firebaseKey) {
                     console.log("LLM Cleaned:", rawTitle, "->", cleaned);
-                    updateQueueItem(queueId, {
-                        cleanTitle: cleaned.title,
-                        cleanArtist: cleaned.artist
-                    });
+                    // Update Firebase if we have a key
+                    if (firebaseKey && firebaseKey !== Date.now().toString()) {
+                        import('firebase/database').then(({ ref, update, getDatabase }) => {
+                            const db = getDatabase();
+                            const itemRef = ref(db, `queue/${firebaseKey}`);
+                            update(itemRef, {
+                                cleanTitle: cleaned.title,
+                                cleanArtist: cleaned.artist
+                            }).catch(() => { });
+                        });
+                    } else {
+                        // Local-only fallback
+                        updateQueueItem(firebaseKey, {
+                            cleanTitle: cleaned.title,
+                            cleanArtist: cleaned.artist
+                        });
+                    }
                 }
             });
         });
@@ -243,7 +283,7 @@ const SearchBar = ({ isExpanded = false }) => {
                         {query.trim() && (
                             <p className="text-[10px] text-slate-400 font-medium flex items-center gap-1.5">
                                 <Link size={12} />
-                                Bấm <span className="text-red-500 font-bold">YouTube</span> → copy link → paste vào ô tìm kiếm
+                                Bấm <span className="text-red-500 font-bold">YouTube</span> → sao chép link → dán vào ô tìm kiếm
                             </p>
                         )}
                     </div>
@@ -288,7 +328,7 @@ const SearchBar = ({ isExpanded = false }) => {
                                             {result.views && (
                                                 <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded flex items-center gap-1">
                                                     <span className="w-1 h-1 rounded-full bg-slate-400"></span>
-                                                    {result.views} views
+                                                    {result.views} lượt xem
                                                 </span>
                                             )}
                                         </div>

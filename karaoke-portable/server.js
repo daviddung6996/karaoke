@@ -2,6 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { exec } from 'node:child_process';
 import { Innertube, UniversalCache } from 'youtubei.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -255,9 +256,39 @@ async function handleSearch(reqUrl, res) {
 }
 
 // ── HTTP Server ──
+// ── Display Mode State ──
+let currentDisplayMode = 'extend';
+
 const server = http.createServer(async (req, res) => {
   const reqUrl = new URL(req.url, `http://${req.headers.host}`);
   const pathname = reqUrl.pathname;
+
+  // API: Display Mode
+  if (pathname === '/api/display/status' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ mode: currentDisplayMode }));
+  }
+  if (pathname === '/api/display/extend' && req.method === 'POST') {
+    return exec('DisplaySwitch.exe /extend', (err) => {
+      if (err) console.warn('[Display] extend failed:', err.message);
+      currentDisplayMode = 'extend';
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ mode: 'extend' }));
+    });
+  }
+  if (pathname === '/api/display/duplicate' && req.method === 'POST') {
+    return exec('DisplaySwitch.exe /clone', (err) => {
+      if (err) console.warn('[Display] clone failed:', err.message);
+      currentDisplayMode = 'duplicate';
+      setTimeout(() => {
+        exec('start https://www.youtube.com', (e) => {
+          if (e) console.warn('[Display] open YouTube failed:', e.message);
+        });
+      }, 2000);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ mode: 'duplicate' }));
+    });
+  }
 
   // API: YouTube Video Info
   if (pathname === '/api/yt/video') return handleVideoInfo(reqUrl, res);

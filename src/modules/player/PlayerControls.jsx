@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAppStore } from '../core/store';
-import { getPlayerTime, getDuration, seekPlayer, isPlayerReady } from './playerRegistry';
+import { getPlayerTime, getDuration } from './playerRegistry';
 import { Volume2, VolumeX, Volume1 } from 'lucide-react';
 
 const CHANNEL_NAME = 'karaoke_sync_channel';
@@ -21,28 +21,32 @@ const formatTime = (seconds) => {
 };
 
 const PlayerControls = () => {
-    const { currentSong, isPlaying } = useAppStore();
+    const { currentSong, restartTrigger } = useAppStore();
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
     const [volume, setVolumeState] = useState(100);
     const [isMuted, setIsMuted] = useState(false);
-    const [isSeeking, setIsSeeking] = useState(false);
-    const [seekValue, setSeekValue] = useState(0);
+    const isRestartingRef = useRef(false);
     const prevVolumeRef = useRef(100);
     const rafRef = useRef(null);
 
-    // Tick: update time & duration
-    const tick = useCallback(() => {
-        if (!isPlayerReady()) {
-            rafRef.current = requestAnimationFrame(tick);
-            return;
+    // Snap to 0 when restart triggered
+    useEffect(() => {
+        if (restartTrigger > 0) {
+            isRestartingRef.current = true;
+            setCurrentTime(0);
+            setTimeout(() => { isRestartingRef.current = false; }, 1000);
         }
-        if (!isSeeking) {
+    }, [restartTrigger]);
+
+    // Tick: read remote time from TV (read-only display)
+    const tick = useCallback(() => {
+        if (!isRestartingRef.current) {
             setCurrentTime(getPlayerTime());
         }
         setDuration(getDuration());
         rafRef.current = requestAnimationFrame(tick);
-    }, [isSeeking]);
+    }, []);
 
     useEffect(() => {
         rafRef.current = requestAnimationFrame(tick);
@@ -77,67 +81,31 @@ const PlayerControls = () => {
         }
     };
 
-    // Seek
-    const handleSeekStart = () => {
-        setIsSeeking(true);
-        setSeekValue(currentTime);
-    };
-
-    const handleSeekChange = (e) => {
-        setSeekValue(Number(e.target.value));
-    };
-
-    const handleSeekEnd = (e) => {
-        const time = Number(e.target.value);
-        seekPlayer(time);
-        sendToTV('SEEK_TO', time);
-        setCurrentTime(time);
-        setIsSeeking(false);
-    };
-
     if (!currentSong) return null;
 
-    const progress = duration > 0 ? ((isSeeking ? seekValue : currentTime) / duration) * 100 : 0;
+    const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
     const VolumeIcon = isMuted || volume === 0 ? VolumeX : volume < 50 ? Volume1 : Volume2;
 
     return (
         <div className="space-y-2">
-            {/* Seek Bar */}
+            {/* Progress Bar (read-only — displays TV playback position) */}
             <div className="space-y-1">
-                <div className="relative group">
-                    <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                        <div
-                            className="h-full bg-indigo-500 rounded-full transition-all duration-100"
-                            style={{ width: `${progress}%` }}
-                        />
-                    </div>
-                    <input
-                        type="range"
-                        min={0}
-                        max={duration || 100}
-                        step={0.5}
-                        value={isSeeking ? seekValue : currentTime}
-                        onMouseDown={handleSeekStart}
-                        onTouchStart={handleSeekStart}
-                        onChange={handleSeekChange}
-                        onMouseUp={(e) => { handleSeekEnd(e); e.target.blur(); }}
-                        onTouchEnd={(e) => { handleSeekEnd(e); e.target.blur(); }}
-                        tabIndex={-1}
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                    <div
+                        className="h-full bg-indigo-500 rounded-full transition-all duration-100"
+                        style={{ width: `${progress}%` }}
                     />
                 </div>
 
                 {/* Time Display */}
                 <div className="flex justify-between items-center">
-                    <span className="text-[10px] font-bold text-slate-400 tabular-nums">{formatTime(isSeeking ? seekValue : currentTime)}</span>
+                    <span className="text-[10px] font-bold text-slate-400 tabular-nums">{formatTime(currentTime)}</span>
                     <span className="text-[10px] font-bold text-slate-400 tabular-nums">{formatTime(duration)}</span>
                 </div>
             </div>
 
-            {/* Volume Control */}
+            {/* Volume */}
             <div className="flex items-center gap-3">
-
-                {/* Volume Control — controls TV audio */}
                 <div className="flex items-center gap-2 flex-1">
                     <button
                         onClick={toggleMute}

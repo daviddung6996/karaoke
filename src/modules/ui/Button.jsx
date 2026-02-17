@@ -1,5 +1,4 @@
 import React from 'react';
-import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
 const Button = ({ children, className, variant = 'primary', ...props }) => {

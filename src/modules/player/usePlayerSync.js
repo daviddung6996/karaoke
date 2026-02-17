@@ -1,182 +1,296 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import { useAppStore } from '../core/store';
-import { getPlayerTime, seekPlayer, isPlayerReady, setVolume, mutePlayer, unmutePlayer } from './playerRegistry';
+import { getPlayerTime, getDuration, getPlayer, isPlayerReady, setVolume, mutePlayer, unmutePlayer, playPlayer, pausePlayer, updateRemoteState, triggerRemoteSongEnded } from './playerRegistry';
 
 const CHANNEL_NAME = 'karaoke_sync_channel';
-const HEARTBEAT_INTERVAL = 3000;
-const DRIFT_THRESHOLD = 2;
 
-export const usePlayerSync = (role = 'host') => {
-    const { currentSong, isPlaying, waitingForGuest, waitCountdown, restartTrigger, queue,
-        setCurrentSong, setIsPlaying, setWaitingForGuest, setWaitCountdown, triggerRestart } = useAppStore();
+/**
+ * Sync hook – Host is the "commander", TV is the "player".
+ * 
+ * Logic:
+ * 1. TV loads the video and plays it.
+ * 2. TV broadcasts SYNC_TIME every second to Host.
+ * 3. TV broadcasts SONG_ENDED when video finishes.
+ * 4. Host uses remote time for progress bar.
+ */
+export const usePlayerSync = (role = 'host', { onSongEnded } = {}) => {
+    const currentSong = useAppStore((s) => s.currentSong);
+    const isPlaying = useAppStore((s) => s.isPlaying);
+    const waitingForGuest = useAppStore((s) => s.waitingForGuest);
+    const waitCountdown = useAppStore((s) => s.waitCountdown);
+    const restartTrigger = useAppStore((s) => s.restartTrigger);
+    const queue = useAppStore((s) => s.queue);
+    const setCurrentSong = useAppStore((s) => s.setCurrentSong);
+    const setIsPlaying = useAppStore((s) => s.setIsPlaying);
+    const setWaitingForGuest = useAppStore((s) => s.setWaitingForGuest);
+    const setWaitCountdown = useAppStore((s) => s.setWaitCountdown);
+    const triggerRestart = useAppStore((s) => s.triggerRestart);
 
+    const channelRef = useRef(null);
     const projectionSongRef = useRef(null);
+    const stopAutoplayRef = useRef(null);
 
-    // --- Projection: receive messages from host ---
+    // --- Get or create persistent channel ---
+    const getChannel = useCallback(() => {
+        if (!channelRef.current) {
+            channelRef.current = new BroadcastChannel(CHANNEL_NAME);
+        }
+        return channelRef.current;
+    }, []);
+
+    const sendMessage = useCallback((type, payload) => {
+        try {
+            getChannel().postMessage({ type, payload });
+        } catch { /* channel closed */ }
+    }, [getChannel]);
+
+    // ========== PROJECTION (TV) ROLE ==========
     useEffect(() => {
         if (role !== 'projection') return;
-        const channel = new BroadcastChannel(CHANNEL_NAME);
+        const channel = getChannel();
 
         channel.onmessage = (event) => {
             const { type, payload } = event.data;
 
-            if (type === 'SET_SONG') {
-                projectionSongRef.current = payload?.videoId || null;
-                setCurrentSong(payload);
-            }
+            switch (type) {
+                case 'SET_SONG': {
+                    if (projectionSongRef.current !== payload?.videoId) {
+                        projectionSongRef.current = payload?.videoId || null;
+                        setCurrentSong(payload);
 
-            if (type === 'PLAY_STATE') {
-                const { isPlaying: playing, time, videoId } = payload;
-                if (videoId && videoId === projectionSongRef.current && isPlayerReady()) {
-                    seekPlayer(time);
-                    setTimeout(() => setIsPlaying(playing), 150);
-                } else {
-                    setIsPlaying(playing);
-                }
-            }
+                        // Reset playing state. Host will send PLAY when ready.
+                        setIsPlaying(false);
 
-            if (type === 'SYNC_TIME') {
-                const { time, videoId } = payload;
-                if (videoId && videoId === projectionSongRef.current && isPlayerReady()) {
-                    const localTime = getPlayerTime();
-                    const drift = Math.abs(time - localTime);
-                    if (drift > DRIFT_THRESHOLD) {
-                        console.log(`[projection] Correcting drift: ${drift.toFixed(1)}s`);
-                        seekPlayer(time);
-                    }
-                }
-            }
+                        // Clear any previous blocker
+                        if (stopAutoplayRef.current) clearInterval(stopAutoplayRef.current);
 
-            if (type === 'WAITING_FOR_GUEST') setWaitingForGuest(payload);
-            if (type === 'COUNTDOWN') setWaitCountdown(payload);
-
-            if (type === 'RESTART') {
-                if (isPlayerReady()) seekPlayer(0);
-                triggerRestart();
-            }
-
-            if (type === 'SET_VOLUME') setVolume(payload);
-            if (type === 'SET_MUTE') {
-                if (payload) mutePlayer();
-                else unmutePlayer();
-            }
-            if (type === 'SEEK_TO') {
-                if (isPlayerReady()) seekPlayer(payload);
-            }
-
-            if (type === 'SYNC_QUEUE') useAppStore.getState().reorderQueue(payload);
-
-            // Full state sync response from host
-            if (type === 'FULL_SYNC') {
-                const { song, playing, time, waiting, countdown, queue } = payload;
-                if (song) {
-                    projectionSongRef.current = song.videoId;
-                    setCurrentSong(song);
-                    // Wait for player to load, then seek & play
-                    const waitForPlayer = setInterval(() => {
+                        // Keep video muted (autoplay:1 will load it muted in bg)
+                        // No need to pause — video plays silently, ready for instant unmute
                         if (isPlayerReady()) {
-                            clearInterval(waitForPlayer);
-                            if (time > 0) seekPlayer(time);
-                            setTimeout(() => setIsPlaying(playing), 300);
+                            mutePlayer();
                         }
-                    }, 200);
-                    // Safety: clear after 10s
-                    setTimeout(() => clearInterval(waitForPlayer), 10000);
+                    }
+                    break;
                 }
-                setWaitingForGuest(waiting);
-                setWaitCountdown(countdown);
-                if (queue) useAppStore.getState().reorderQueue(queue);
+
+                case 'PLAY': {
+                    console.log('[Sync] Received PLAY → unmuting TV');
+
+                    if (stopAutoplayRef.current) {
+                        clearInterval(stopAutoplayRef.current);
+                        stopAutoplayRef.current = null;
+                    }
+
+                    setIsPlaying(true);
+
+                    const doUnmute = () => {
+                        unmutePlayer();
+                        playPlayer();
+                    };
+
+                    if (isPlayerReady()) {
+                        doUnmute();
+                    } else {
+                        console.log('[Sync] Player not ready. Waiting to unmute...');
+                        const waitForReady = setInterval(() => {
+                            if (isPlayerReady()) {
+                                clearInterval(waitForReady);
+                                doUnmute();
+                            }
+                        }, 300);
+                        setTimeout(() => clearInterval(waitForReady), 10000);
+                    }
+                    break;
+                }
+
+                case 'PAUSE': {
+                    console.log('[Sync] Received PAUSE → muting TV');
+                    setIsPlaying(false);
+                    if (isPlayerReady()) mutePlayer();
+                    break;
+                }
+
+                case 'WAITING_FOR_GUEST':
+                    setWaitingForGuest(payload);
+                    break;
+
+                case 'COUNTDOWN':
+                    setWaitCountdown(payload);
+                    break;
+
+                case 'RESTART': {
+                    // Restart = seek to 0 on TV only
+                    if (isPlayerReady()) {
+                        const player = getPlayer();
+                        if (player) player.seekTo(0, true);
+                    }
+                    triggerRestart();
+                    break;
+                }
+
+                case 'SET_VOLUME':
+                    setVolume(payload);
+                    break;
+
+                case 'SET_MUTE':
+                    if (payload) mutePlayer();
+                    else unmutePlayer();
+                    break;
+
+                case 'SYNC_QUEUE':
+                    useAppStore.getState().reorderQueue(payload);
+                    break;
+
+                case 'FULL_SYNC': {
+                    const { song, playing, waiting, countdown, queue: syncQueue } = payload;
+
+                    if (stopAutoplayRef.current) {
+                        clearInterval(stopAutoplayRef.current);
+                        stopAutoplayRef.current = null;
+                    }
+
+                    if (song) {
+                        projectionSongRef.current = song.videoId;
+                        setCurrentSong(song);
+                        // Just wait for player ready → play (no seeking)
+                        if (playing) {
+                            const waitForPlayer = setInterval(() => {
+                                if (isPlayerReady()) {
+                                    clearInterval(waitForPlayer);
+                                    playPlayer();
+                                    setTimeout(() => unmutePlayer(), 300);
+                                    setIsPlaying(true);
+                                }
+                            }, 300);
+                            setTimeout(() => clearInterval(waitForPlayer), 10000);
+                        }
+                    }
+                    setWaitingForGuest(waiting);
+                    setWaitCountdown(countdown);
+                    if (syncQueue) useAppStore.getState().reorderQueue(syncQueue);
+                    break;
+                }
             }
         };
 
         // Request full state from host on mount
         channel.postMessage({ type: 'REQUEST_SYNC' });
 
-        return () => channel.close();
-    }, [role, setCurrentSong, setIsPlaying, setWaitingForGuest, setWaitCountdown, triggerRestart]);
+        // Broadcast time to host every 2s (reduced from 1s for bandwidth)
+        const interval = setInterval(() => {
+            if (isPlayerReady()) {
+                sendMessage('SYNC_TIME', {
+                    time: getPlayerTime(),
+                    duration: getDuration()
+                });
+            }
+        }, 2000);
 
-    // --- Host: listen for REQUEST_SYNC from projection ---
+        return () => {
+            clearInterval(interval);
+            channel.close();
+            channelRef.current = null;
+        };
+    }, [role, getChannel, setCurrentSong, setIsPlaying, setWaitingForGuest, setWaitCountdown, triggerRestart, sendMessage]);
+
+    // ========== HOST ROLE ==========
+
+    // Listen for REQUEST_SYNC and SYNC_TIME from projection
     useEffect(() => {
         if (role !== 'host') return;
-        const channel = new BroadcastChannel(CHANNEL_NAME);
+        const channel = getChannel();
 
         channel.onmessage = (event) => {
-            const { type } = event.data;
+            const { type, payload } = event.data;
+
             if (type === 'REQUEST_SYNC') {
                 const store = useAppStore.getState();
-                const reply = new BroadcastChannel(CHANNEL_NAME);
-                reply.postMessage({
-                    type: 'FULL_SYNC',
-                    payload: {
-                        song: store.currentSong,
-                        playing: store.isPlaying,
-                        time: getPlayerTime(),
-                        waiting: store.waitingForGuest,
-                        countdown: store.waitCountdown,
-                        queue: store.queue,
-                    }
+                sendMessage('FULL_SYNC', {
+                    song: store.currentSong,
+                    playing: store.isPlaying,
+                    waiting: store.waitingForGuest,
+                    countdown: store.waitCountdown,
+                    queue: store.queue,
                 });
-                reply.close();
+            } else if (type === 'SYNC_TIME') {
+                updateRemoteState(payload.time, payload.duration);
+            } else if (type === 'SONG_ENDED') {
+                triggerRemoteSongEnded();
+                if (onSongEnded) onSongEnded();
             }
         };
 
-        return () => channel.close();
-    }, [role]);
+        return () => {
+            channel.close();
+            channelRef.current = null;
+        };
+    }, [role, getChannel, sendMessage, onSongEnded]);
 
-    // --- Host: send state changes to projection ---
+    // Send song change — only when videoId actually changes
+    const prevSongIdRef = useRef(null);
     useEffect(() => {
         if (role !== 'host') return;
-        const channel = new BroadcastChannel(CHANNEL_NAME);
 
-        // Sync Queue
-        channel.postMessage({ type: 'SYNC_QUEUE', payload: queue });
-
-        if (currentSong) {
-            channel.postMessage({ type: 'SET_SONG', payload: currentSong });
+        // If staged, send NULL to TV so it shows idle background
+        if (currentSong?.isStaged) {
+            sendMessage('SET_SONG', null);
+            return;
         }
 
-        const time = getPlayerTime();
-        channel.postMessage({
-            type: 'PLAY_STATE',
-            payload: { isPlaying, time, videoId: currentSong?.videoId }
-        });
+        const videoId = currentSong?.videoId || null;
+        if (videoId === prevSongIdRef.current) return;
+        prevSongIdRef.current = videoId;
 
-        channel.postMessage({ type: 'WAITING_FOR_GUEST', payload: waitingForGuest });
+        if (currentSong) {
+            sendMessage('SET_SONG', currentSong);
+        }
+    }, [role, currentSong, sendMessage]);
 
-        return () => channel.close();
-    }, [role, currentSong, isPlaying, waitingForGuest, queue]);
-
-    // --- Host: send countdown ---
+    // Send play/pause — discrete commands
+    const prevIsPlayingRef = useRef(null);
     useEffect(() => {
         if (role !== 'host') return;
-        const channel = new BroadcastChannel(CHANNEL_NAME);
-        channel.postMessage({ type: 'COUNTDOWN', payload: waitCountdown });
-        channel.close();
-    }, [role, waitCountdown]);
+        if (isPlaying === prevIsPlayingRef.current) return;
+        prevIsPlayingRef.current = isPlaying;
 
-    // --- Host: send restart ---
+        sendMessage(isPlaying ? 'PLAY' : 'PAUSE');
+    }, [role, isPlaying, sendMessage]);
+
+    // Send waitingForGuest
+    const prevWaitingRef = useRef(null);
+    useEffect(() => {
+        if (role !== 'host') return;
+        if (waitingForGuest === prevWaitingRef.current) return;
+        prevWaitingRef.current = waitingForGuest;
+
+        sendMessage('WAITING_FOR_GUEST', waitingForGuest);
+    }, [role, waitingForGuest, sendMessage]);
+
+    // Send queue changes (debounced to avoid flooding TV)
+    const queueSyncTimerRef = useRef(null);
+    useEffect(() => {
+        if (role !== 'host') return;
+        if (queueSyncTimerRef.current) clearTimeout(queueSyncTimerRef.current);
+        queueSyncTimerRef.current = setTimeout(() => {
+            sendMessage('SYNC_QUEUE', queue);
+        }, 500);
+        return () => {
+            if (queueSyncTimerRef.current) clearTimeout(queueSyncTimerRef.current);
+        };
+    }, [role, queue, sendMessage]);
+
+    // Send countdown
+    useEffect(() => {
+        if (role !== 'host') return;
+        sendMessage('COUNTDOWN', waitCountdown);
+    }, [role, waitCountdown, sendMessage]);
+
+    // Send restart
     useEffect(() => {
         if (role !== 'host' || restartTrigger === 0) return;
-        const channel = new BroadcastChannel(CHANNEL_NAME);
-        channel.postMessage({ type: 'RESTART' });
-        channel.close();
-    }, [role, restartTrigger]);
+        sendMessage('RESTART');
+    }, [role, restartTrigger, sendMessage]);
 
-    // --- Host: periodic heartbeat ---
-    useEffect(() => {
-        if (role !== 'host') return;
-
-        const interval = setInterval(() => {
-            if (!isPlaying || !isPlayerReady()) return;
-
-            const channel = new BroadcastChannel(CHANNEL_NAME);
-            channel.postMessage({
-                type: 'SYNC_TIME',
-                payload: { time: getPlayerTime(), videoId: currentSong?.videoId }
-            });
-            channel.close();
-        }, HEARTBEAT_INTERVAL);
-
-        return () => clearInterval(interval);
-    }, [role, isPlaying, currentSong?.videoId]);
+    // Expose sendMessage for manual triggers if needed (e.g. from ValidationView)
+    return { sendMessage };
 };

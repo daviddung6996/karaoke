@@ -1,8 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useAppStore } from '../core/store';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
-import { Trash2, GripVertical } from 'lucide-react';
+import { Trash2, GripVertical, X } from 'lucide-react';
 import { AnimatePresence, motion, Reorder, useDragControls } from 'framer-motion';
 
 
@@ -28,7 +28,7 @@ const QueueItem = ({ item, index, onRemove, onPlay, onInvite, isFirst, queueMode
                         <GripVertical size={16} />
                     </div>
                     <div className="flex-1 min-w-0">
-                        <h3 className="font-black text-slate-800 text-sm leading-relaxed truncate uppercase tracking-tight" title={item.title} style={{ textDecoration: 'none', borderBottom: 'none', paddingBottom: '2px' }}>{item.title}</h3>
+                        <h3 className="font-black text-slate-800 text-sm leading-relaxed truncate uppercase tracking-tight" title={item.title} style={{ textDecoration: 'none', borderBottom: 'none', paddingBottom: '2px' }}>{item.title || 'Không có tiêu đề'}</h3>
                         <span className="text-xs font-black text-slate-500 bg-slate-100 px-2 py-1 rounded-md uppercase tracking-wide">{item.addedBy}</span>
                     </div>
 
@@ -65,6 +65,16 @@ const QueueItem = ({ item, index, onRemove, onPlay, onInvite, isFirst, queueMode
 
 const QueueList = ({ onReAnnounce }) => {
     const { queue, removeFromQueue, currentSong, setCurrentSong, setIsPlaying, isPlaying, reorderQueue, queueMode, invitedSongId, setInvitedSongId, waitingForGuest } = useAppStore();
+    const [showClearModal, setShowClearModal] = useState(false);
+
+    const handleRemove = (itemId) => {
+        // If deleting the currently playing song, clear currentSong to show BG video
+        if (currentSong?.id === itemId) {
+            setCurrentSong(null);
+            setIsPlaying(false);
+        }
+        removeFromQueue(itemId);
+    };
 
     const handlePlay = (item) => {
         setCurrentSong(item);
@@ -74,6 +84,20 @@ const QueueList = ({ onReAnnounce }) => {
 
     const handleInvite = (item) => {
         setInvitedSongId(item.id);
+    };
+
+    const handleClearQueue = async () => {
+        try {
+            // Import clearFirebaseQueue
+            const { clearFirebaseQueue } = await import('../../services/firebaseQueueService');
+            await clearFirebaseQueue();
+            // Also clear local queue
+            queue.forEach((item) => removeFromQueue(item.id));
+            setShowClearModal(false);
+            console.log('[QueueList] Queue cleared');
+        } catch (err) {
+            console.error('[QueueList] Clear queue failed:', err);
+        }
     };
 
     return (
@@ -145,7 +169,18 @@ const QueueList = ({ onReAnnounce }) => {
                 <div className="space-y-2">
                     <div className="flex justify-between items-end px-1 mb-2">
                         <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest">Hàng Chờ</h2>
-                        <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{queue.length}</span>
+                        <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{queue.length}</span>
+                            {queue.length > 0 && (
+                                <button
+                                    onClick={() => setShowClearModal(true)}
+                                    className="text-slate-400 hover:text-red-500 transition-colors p-1 rounded-md cursor-pointer active:scale-90 hover:bg-red-50"
+                                    title="Xóa hàng chờ"
+                                >
+                                    <Trash2 size={14} />
+                                </button>
+                            )}
+                        </div>
                     </div>
 
                     {queue.length === 0 && !currentSong && (
@@ -161,7 +196,7 @@ const QueueList = ({ onReAnnounce }) => {
                                     key={item.id}
                                     item={item}
                                     index={index}
-                                    onRemove={removeFromQueue}
+                                    onRemove={handleRemove}
                                     onPlay={handlePlay}
                                     onInvite={handleInvite}
                                     isFirst={!currentSong && index === 0}
@@ -173,6 +208,58 @@ const QueueList = ({ onReAnnounce }) => {
                     </Reorder.Group>
                 </div>
             </div>
+
+            {/* Clear Queue Confirmation Modal */}
+            {showClearModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+                    <motion.div
+                        initial={{ scale: 0.95, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        exit={{ scale: 0.95, opacity: 0 }}
+                        className="bg-white rounded-2xl border border-slate-200 w-full max-w-sm overflow-hidden shadow-xl"
+                    >
+                        {/* Header */}
+                        <div className="p-4 border-b border-slate-100 bg-red-50 flex justify-between items-center">
+                            <h3 className="text-lg font-black text-red-600 uppercase tracking-tighter">Xóa Hàng Chờ?</h3>
+                            <button
+                                onClick={() => setShowClearModal(false)}
+                                className="p-2 hover:bg-red-100 rounded-full transition-colors"
+                            >
+                                <X size={20} className="text-red-500" />
+                            </button>
+                        </div>
+
+                        {/* Content */}
+                        <div className="p-6 space-y-4">
+                            <p className="text-slate-700 font-bold">
+                                Bạn chắc chắn muốn xóa tất cả <span className="text-red-600">{queue.length}</span> bài trong hàng chờ?
+                            </p>
+                            <p className="text-sm text-slate-500">
+                                ⚠️ Hành động này không thể hoàn tác
+                            </p>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="p-4 bg-slate-50 flex gap-3 border-t border-slate-100">
+                            <Button
+                                onClick={() => setShowClearModal(false)}
+                                variant="ghost"
+                                size="lg"
+                                className="text-slate-600 hover:text-slate-800 font-bold flex-1"
+                            >
+                                Hủy
+                            </Button>
+                            <Button
+                                onClick={handleClearQueue}
+                                size="lg"
+                                className="bg-red-600 hover:bg-red-700 text-white font-black flex-1"
+                            >
+                                Xóa Tất Cả
+                            </Button>
+                        </div>
+                    </motion.div>
+                </div>
+            )}
         </div>
     );
 };

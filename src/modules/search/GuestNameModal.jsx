@@ -34,40 +34,39 @@ const GuestNameModal = ({ isOpen, onClose, onConfirm, songTitle }) => {
     };
 
     // Chỉ hàm này mới thực sự thêm vào queue
-    const handleSubmit = () => {
+    const handleSubmit = (isPriority = false) => {
         const finalName = name.trim();
         if (!finalName || isSubmitting) return;
         setIsSubmitting(true);
-        onConfirm(finalName);
+        // Ensure onConfirm is a function before calling
+        if (typeof onConfirm === 'function') {
+            onConfirm(finalName, isPriority);
+        }
         onClose();
     };
 
     const handleKeyDown = (e) => {
-        const COLS = 3;
+        // Change to 1 column list for better UX
+        const COLS = 1;
         let nextIndex = selectedIndex;
 
         if (e.key === 'ArrowDown') {
             e.preventDefault();
-            nextIndex = selectedIndex + COLS;
-            if (nextIndex >= suggestions.length) nextIndex = selectedIndex;
+            nextIndex = selectedIndex + 1;
+            if (nextIndex >= suggestions.length) nextIndex = 0; // Wrap around? Or stop? User might prefer stop.
+            // Let's stop at end for standard behavior, or loop. Loop is nice.
+            // But usually dropdowns loop.
+            if (nextIndex >= suggestions.length) nextIndex = suggestions.length - 1; // Stop at end
         } else if (e.key === 'ArrowUp') {
             e.preventDefault();
-            nextIndex = selectedIndex - COLS;
-            if (nextIndex < 0) nextIndex = selectedIndex;
-        } else if (e.key === 'ArrowRight') {
-            e.preventDefault();
-            nextIndex = Math.min(suggestions.length - 1, selectedIndex + 1);
-        } else if (e.key === 'ArrowLeft') {
-            e.preventDefault();
-            nextIndex = Math.max(0, selectedIndex - 1);
+            nextIndex = selectedIndex - 1;
+            if (nextIndex < 0) nextIndex = 0; // Stop at start
         } else if (e.key === 'Enter') {
             e.preventDefault();
             // Enter = chọn gợi ý đang highlight (điền vào input)
-            // Enter lần 2 (khi không có gợi ý hoặc tên đã chọn) = submit
-            if (suggestions.length > 0 && name !== suggestions[selectedIndex]) {
+            // KHÔNG tự động submit (theo yêu cầu user)
+            if (suggestions.length > 0) {
                 handlePick(suggestions[selectedIndex]);
-            } else {
-                handleSubmit();
             }
             return;
         } else if (e.key === 'Tab') {
@@ -97,7 +96,7 @@ const GuestNameModal = ({ isOpen, onClose, onConfirm, songTitle }) => {
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
-            <div className="bg-white rounded-3xl border border-slate-200 w-full max-w-5xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="bg-white rounded-3xl border border-slate-200 w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
 
                 {/* Header */}
                 <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
@@ -134,15 +133,15 @@ const GuestNameModal = ({ isOpen, onClose, onConfirm, songTitle }) => {
                     {suggestions.length > 0 && (
                         <div className="flex-1 overflow-y-auto custom-scrollbar -mx-2 px-2">
                             <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2 ml-1">Gợi ý (Chọn bằng phím mũi tên)</p>
-                            <div ref={listRef} className="grid grid-cols-3 gap-2">
+                            <div ref={listRef} className="flex flex-col gap-2">
                                 {suggestions.map((sug, index) => (
                                     <button
                                         key={index}
                                         onClick={() => handlePick(sug)}
-                                        className={`p-2.5 rounded-xl text-left transition-all flex items-center justify-between group cursor-pointer
+                                        className={`p-3 rounded-xl text-left transition-all flex items-center justify-between group cursor-pointer border
                                             ${index === selectedIndex
-                                                ? 'bg-indigo-600 text-white'
-                                                : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-transparent hover:border-slate-200'
+                                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg shadow-indigo-200'
+                                                : 'bg-white text-slate-700 hover:bg-slate-50 border-slate-100 hover:border-slate-200'
                                             }`}
                                     >
                                         <span className="text-xl font-bold">{sug}</span>
@@ -166,12 +165,20 @@ const GuestNameModal = ({ isOpen, onClose, onConfirm, songTitle }) => {
                         Hủy
                     </Button>
                     <Button
-                        onClick={handleSubmit}
+                        onClick={() => handleSubmit(false)}
                         disabled={!name.trim()}
                         size="lg"
                         className="px-8 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-lg"
                     >
-                        Thêm Vào Queue
+                        Thêm Vào Hàng Chờ
+                    </Button>
+                    <Button
+                        onClick={() => handleSubmit(true)}
+                        disabled={!name.trim()}
+                        size="lg"
+                        className="px-8 bg-green-600 hover:bg-green-700 text-white rounded-xl font-black text-lg shadow-lg shadow-green-200"
+                    >
+                        Ưu Tiên (Lên Đầu)
                     </Button>
                 </div>
             </div>

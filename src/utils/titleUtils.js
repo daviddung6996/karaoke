@@ -12,8 +12,8 @@ export function cleanYoutubeTitle(raw) {
         .replace(/\[.*?\]/g, '')
         // Remove parentheses: (Official MV), (Lyric Video)...
         .replace(/\(.*?\)/g, '')
-        // Remove SEO keywords
-        .replace(/\b(karaoke|beat|tone|tong|nam|nữ|nu|hạ tông|ha tong|gốc|goc|dễ hát|de hat|chuẩn|chuan|nhạc sống|nhac song|full hd|hd|4k|official|mv|lyric|lyrics|video|audio|remix|cover|live|lofi|lo-fi|ver|version)\b/gi, '')
+        // Remove SEO keywords - Use whitespace boundaries instead of \b for Vietnamese support
+        .replace(/(^|\s)(karaoke|beat|tone|tong|nam|nữ|nu|hạ tông|ha tong|gốc|goc|dễ hát|de hat|chuẩn|chuan|nhạc sống|nhac song|full hd|hd|4k|official|mv|lyric|lyrics|video|audio|remix|cover|live|lofi|lo-fi|ver|version)(?=$|\s)/gi, '')
         .trim();
 
     // Remove leading/trailing separators left behind (e.g., " - Song Name")

@@ -1,28 +1,52 @@
 import React, { useEffect, useRef } from 'react';
 import YouTube from 'react-youtube';
 import { useAppStore } from '../core/store';
-import { registerPlayer, unregisterPlayer } from './playerRegistry';
+import { registerPlayer, unregisterPlayer, playPlayer, pausePlayer, isPlayerReady } from './playerRegistry';
 
-const YouTubePlayer = ({ className, onReady, onStateChange, onEnded, muted = false, controls = true, quality = null }) => {
-    const { currentSong, isPlaying, setIsPlaying, restartTrigger, waitingForGuest } = useAppStore();
+const YouTubePlayer = ({ className, onReady, onStateChange, onEnded, muted = false, controls = true, quality = null, autoUnmute = false, passive = false }) => {
+    const currentSong = useAppStore((s) => s.currentSong);
+    const isPlaying = useAppStore((s) => s.isPlaying);
+    const setIsPlaying = useAppStore((s) => s.setIsPlaying);
+    const restartTrigger = useAppStore((s) => s.restartTrigger);
+    const waitingForGuest = useAppStore((s) => s.waitingForGuest);
     const playerRef = useRef(null);
     const justLoadedRef = useRef(false);
+    const containerRef = useRef(null);
+    const hasUnmutedRef = useRef(false);
 
     const opts = React.useMemo(() => ({
         height: '100%',
         width: '100%',
         playerVars: {
-            autoplay: 0,
+            autoplay: autoUnmute ? 1 : 0,
             controls: controls ? 1 : 0,
-            mute: muted ? 1 : 0,
+            mute: autoUnmute ? 1 : (muted ? 1 : 0), // TV: muted autoplay (no audio leak). Host: based on prop.
             disablekb: controls ? 0 : 1,
             modestbranding: 1,
-            fs: controls ? 1 : 0,
+            playsinline: 1,
+            enablejsapi: 1,
+            fs: 0,
             iv_load_policy: 3,
             rel: 0,
             origin: window.location.origin,
         },
-    }), [controls, muted]);
+    }), [controls, muted, autoUnmute]);
+
+    // Fallback: Unmute on any click (if browser blocked programmatic unmute)
+    useEffect(() => {
+        if (!autoUnmute) return;
+
+        const handleGlobalClick = () => {
+            if (playerRef.current) {
+                console.log('[YouTubePlayer] Global click detected. Unmuting...');
+                playerRef.current.unMute();
+                playerRef.current.setVolume(100);
+            }
+        };
+
+        document.addEventListener('click', handleGlobalClick, { once: true });
+        return () => document.removeEventListener('click', handleGlobalClick);
+    }, [autoUnmute]);
 
     const _onReady = (event) => {
         playerRef.current = event.target;
@@ -31,82 +55,162 @@ const YouTubePlayer = ({ className, onReady, onStateChange, onEnded, muted = fal
         const iframe = event.target.getIframe();
         if (iframe) {
             iframe.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen";
-            iframe.style.pointerEvents = 'auto';
         }
 
-        // Force low quality on control panel to save bandwidth
-        if (quality) {
-            event.target.setPlaybackQuality(quality);
-        }
+        const enforceQuality = () => {
+            if (quality && event.target.setPlaybackQuality) {
+                event.target.setPlaybackQuality(quality);
+            }
+        };
+
+        enforceQuality();
+
+        // Periodic enforcement (every 5s) to fight YouTube auto-quality
+        if (window.ytQualityInterval) clearInterval(window.ytQualityInterval);
+        window.ytQualityInterval = setInterval(enforceQuality, 5000);
 
         justLoadedRef.current = true;
         setTimeout(() => { justLoadedRef.current = false; }, 1500);
 
-        // Always pause on load — only play when store explicitly says so
-        event.target.pauseVideo();
+        // Initial Load Logic
+        const store = useAppStore.getState();
+        const shouldPlay = store.isPlaying && !store.waitingForGuest;
+
+        if (passive) {
+            // TV mode: video starts muted via autoplay:1 + mute:1
+            // Only unmute when Host sends PLAY (store.isPlaying=true)
+            if (shouldPlay) {
+                console.log('[YouTubePlayer] TV _onReady: Store is playing → unmuting.');
+                event.target.unMute();
+                event.target.setVolume(100);
+            } else {
+                console.log('[YouTubePlayer] TV _onReady: Waiting for PLAY → staying muted.');
+                event.target.mute();
+                event.target.setVolume(0);
+            }
+        } else if (shouldPlay) {
+            console.log('[YouTubePlayer] Host: Initial load playing.');
+            event.target.playVideo();
+        } else {
+            console.log('[YouTubePlayer] Host: Initial load paused.');
+            event.target.mute();
+            event.target.pauseVideo();
+        }
 
         if (onReady) onReady(event);
     };
 
     // Unregister on unmount AND on videoId change (before new player mounts)
     useEffect(() => {
+        hasUnmutedRef.current = false;
+
+        // Cue trick removed — usePlayerSync handles TV playback control directly
+
         return () => {
-            unregisterPlayer();
-            playerRef.current = null;
+            if (window.ytQualityInterval) clearInterval(window.ytQualityInterval);
+            if (!currentSong?.videoId) { // Only unregister if truly unmounting/clearing
+                unregisterPlayer();
+                playerRef.current = null;
+            }
         };
-    }, [currentSong?.videoId]);
+    }, [currentSong?.videoId, autoUnmute, quality]);
 
     const _onStateChange = (event) => {
         const store = useAppStore.getState();
 
-        // Re-enforce quality cap on buffering/playing to prevent YouTube auto-upgrade
         if (quality && (event.data === 1 || event.data === 3)) {
             event.target.setPlaybackQuality(quality);
         }
 
-        // STRICT: While waiting for guest, NEVER allow playback
+        // STRICT: While waiting for guest, NEVER allow playback audio
         if (store.waitingForGuest && event.data === 1) {
-            event.target.pauseVideo();
+            if (passive) {
+                // TV: don't pause (autoplay:1 keeps video loaded), but ensure muted
+                event.target.mute();
+                event.target.setVolume(0);
+            } else {
+                event.target.pauseVideo();
+            }
             return;
         }
 
-        // During initial load, block YouTube auto-play if store says paused
-        if (justLoadedRef.current && event.data === 1 && !store.isPlaying) {
+        // During initial load, block YouTube auto-play if store says paused (Host only)
+        if (justLoadedRef.current && event.data === 1 && !store.isPlaying && !passive) {
             event.target.pauseVideo();
             return;
         }
 
         if (onStateChange) onStateChange(event);
-        if (event.data === 1) setIsPlaying(true);
-        if (event.data === 2) setIsPlaying(false);
+
+        if (passive) {
+            // TV mode: unmute/mute based on store state
+            if (event.data === 1) {
+                if (store.isPlaying && !store.waitingForGuest) {
+                    console.log('[YouTubePlayer] TV playing + store.isPlaying → unmuting.');
+                    event.target.unMute();
+                    event.target.setVolume(100);
+                } else {
+                    // Keep muted — video plays silently in background
+                    event.target.mute();
+                    event.target.setVolume(0);
+                }
+            }
+        } else {
+            if (event.data === 1) setIsPlaying(true);
+            if (event.data === 2) setIsPlaying(false);
+        }
         if (event.data === 0 && onEnded) onEnded();
     };
 
     // Sync logic: When store state changes, update player
     // STRICT: Also block play while waitingForGuest
     useEffect(() => {
-        if (!playerRef.current) return;
+        if (!isPlayerReady()) return;
+        // TV (passive) mode: usePlayerSync directly controls player. Skip this effect.
+        if (passive) return;
+
         if (isPlaying && !waitingForGuest) {
-            playerRef.current.playVideo();
+            if (autoUnmute) {
+                // Mute → Play → Unmute trick for autoplay browsers
+                if (playerRef.current) {
+                    playerRef.current.mute();
+                    playerRef.current.playVideo();
+                    setTimeout(() => {
+                        if (playerRef.current) {
+                            playerRef.current.unMute();
+                            playerRef.current.setVolume(100);
+                        }
+                    }, 500);
+                }
+            } else {
+                playPlayer();
+            }
         } else {
-            playerRef.current.pauseVideo();
+            pausePlayer();
         }
-    }, [isPlaying, waitingForGuest]);
+    }, [isPlaying, waitingForGuest, autoUnmute]);
 
     // Restart logic
     useEffect(() => {
-        if (playerRef.current && restartTrigger > 0) {
-            playerRef.current.seekTo(0);
-            playerRef.current.playVideo();
+        if (restartTrigger > 0 && isPlayerReady()) {
+            playerRef.current.seekTo(0, true);
+            setTimeout(() => playPlayer(), 100);
         }
     }, [restartTrigger]);
 
-    if (!currentSong) return <div className="bg-black text-white flex items-center justify-center h-full w-full">No Song Playing</div>;
+    if (!currentSong) return <div className="bg-black text-white flex items-center justify-center h-full w-full">Chưa phát bài nào</div>;
 
     return (
-        <div className={className}>
+        <div ref={containerRef} className={className} style={{ position: 'relative', overflow: 'hidden' }}>
+            <style>{`
+                .ytp-endscreen-container {
+                    display: none !important;
+                }
+                .ytp-suggestions {
+                    display: none !important;
+                }
+            `}</style>
             <YouTube
-                key={currentSong.videoId}
                 videoId={currentSong.videoId}
                 opts={opts}
                 onReady={_onReady}

@@ -50,12 +50,7 @@ const SuggestDropdown = ({ suggestions, isLoading, onSelect, selectedIndex = -1 
                                     <div className={`text-lg font-bold truncate transition-colors ${isSelected ? 'text-indigo-700' : 'text-slate-800 group-hover:text-indigo-700'}`}>
                                         {item.title}
                                     </div>
-                                    {/* Artist Name if available */}
-                                    {item.artist && (
-                                        <div className="text-sm font-medium text-slate-500 uppercase tracking-wide truncate">
-                                            {item.artist}
-                                        </div>
-                                    )}
+
                                 </div>
                             </div>
                         </React.Fragment>
