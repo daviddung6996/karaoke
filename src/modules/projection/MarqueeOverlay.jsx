@@ -32,18 +32,18 @@ const MarqueeOverlay = React.memo(() => {
                 }
             }
 
-            // Show at: Start (5s), Middle (50%), Near End (end-35s)
+            // Show at: Start (5s) and Near End (end-35s)
             timeouts.push(setTimeout(show, 5000));
 
-            if (durationSec > 60) {
-                const mid = (durationSec * 1000) / 2;
-                if (mid > 5000 + showDuration) timeouts.push(setTimeout(show, mid));
-
+            if (durationSec > 0) {
                 let end = (durationSec * 1000) - 35000;
+                // For shorter songs, show near 85% completion
                 if (end < 0) end = (durationSec * 1000) * 0.85;
-                if (end > mid + showDuration) timeouts.push(setTimeout(show, end));
-            } else {
-                timeouts.push(setInterval(show, 45000));
+
+                // Only show end if it doesn't overlap with the start notification (13s)
+                if (end > 5000 + showDuration + 2000) {
+                    timeouts.push(setTimeout(show, end));
+                }
             }
 
             return () => {
@@ -54,12 +54,7 @@ const MarqueeOverlay = React.memo(() => {
         }
     }, [currentSong]);
 
-    // Show immediately when next song is added
-    useEffect(() => {
-        if (currentSong && nextVideoId) {
-            setIsVisible(true);
-        }
-    }, [nextVideoId]);
+    // "New Song Added" trigger removed to keep TV screen distraction-free
 
     if (!currentSong) return null;
 
@@ -68,12 +63,7 @@ const MarqueeOverlay = React.memo(() => {
 
     return (
         <div
-            className="absolute top-0 left-0 right-0 z-50 pointer-events-none flex justify-center px-8 pt-8"
-            style={{
-                opacity: isVisible ? 1 : 0,
-                transform: isVisible ? 'translateY(0)' : 'translateY(-100%)',
-                transition: 'opacity 0.5s ease, transform 0.5s ease',
-            }}
+            className={`absolute top-0 left-0 right-0 z-50 pointer-events-none flex justify-center px-8 pt-8 transition-[opacity,transform] duration-500 ease-in-out ${isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-full'}`}
         >
             <div className="flex items-stretch gap-0 w-[95vw] max-w-[95vw] rounded-3xl overflow-hidden bg-black/85 border border-white/10">
                 {/* Current song */}

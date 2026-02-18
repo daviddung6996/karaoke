@@ -280,11 +280,7 @@ const server = http.createServer(async (req, res) => {
     return exec('DisplaySwitch.exe /clone', (err) => {
       if (err) console.warn('[Display] clone failed:', err.message);
       currentDisplayMode = 'duplicate';
-      setTimeout(() => {
-        exec('start https://www.youtube.com', (e) => {
-          if (e) console.warn('[Display] open YouTube failed:', e.message);
-        });
-      }, 2000);
+
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ mode: 'duplicate' }));
     });

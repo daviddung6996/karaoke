@@ -19,13 +19,15 @@ export const useTTS = () => {
                     const url = `/tts?ie=UTF-8&tl=vi&client=gtx&q=${encodeURIComponent(text)}`;
                     const res = await fetch(url);
                     const blob = await res.blob();
-                    const audio = new Audio(URL.createObjectURL(blob));
+                    const blobUrl = URL.createObjectURL(blob);
+                    const audio = new Audio(blobUrl);
 
                     audio.playbackRate = 1.0;
 
                     // Resolve when audio finishes or errors
-                    audio.onended = () => resolve();
+                    audio.onended = () => { URL.revokeObjectURL(blobUrl); resolve(); };
                     audio.onerror = (e) => {
+                        URL.revokeObjectURL(blobUrl);
                         console.error("Audio playback error", e);
                         resolve();
                     };

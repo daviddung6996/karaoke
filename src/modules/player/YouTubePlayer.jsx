@@ -19,6 +19,9 @@ const YouTubePlayer = React.memo(({ className, onReady, onStateChange, onEnded, 
     const playerRef = useRef(null);
     const justLoadedRef = useRef(false);
     const containerRef = useRef(null);
+    const justLoadedTimerRef = useRef(null);
+    const autoUnmuteTimerRef = useRef(null);
+    const restartTimerRef = useRef(null);
 
     const opts = React.useMemo(() => ({
         height: '100%',
@@ -56,8 +59,10 @@ const YouTubePlayer = React.memo(({ className, onReady, onStateChange, onEnded, 
         playerRef.current = event.target;
         registerPlayer(event.target);
 
+        // Fix allow/allowfullscreen deprecation warning
         const iframe = event.target.getIframe();
         if (iframe) {
+            iframe.removeAttribute('allowfullscreen');
             iframe.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen";
         }
 
@@ -74,7 +79,8 @@ const YouTubePlayer = React.memo(({ className, onReady, onStateChange, onEnded, 
         window.ytQualityInterval = setInterval(enforceQuality, 30000);
 
         justLoadedRef.current = true;
-        setTimeout(() => { justLoadedRef.current = false; }, 1500);
+        if (justLoadedTimerRef.current) clearTimeout(justLoadedTimerRef.current);
+        justLoadedTimerRef.current = setTimeout(() => { justLoadedRef.current = false; }, 1500);
 
         // Initial Load Logic
         const store = useAppStore.getState();
@@ -102,6 +108,9 @@ const YouTubePlayer = React.memo(({ className, onReady, onStateChange, onEnded, 
     useEffect(() => {
         return () => {
             if (window.ytQualityInterval) clearInterval(window.ytQualityInterval);
+            if (justLoadedTimerRef.current) clearTimeout(justLoadedTimerRef.current);
+            if (autoUnmuteTimerRef.current) clearTimeout(autoUnmuteTimerRef.current);
+            if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
             if (!currentSong?.videoId) { // Only unregister if truly unmounting/clearing
                 unregisterPlayer();
                 playerRef.current = null;
@@ -170,7 +179,8 @@ const YouTubePlayer = React.memo(({ className, onReady, onStateChange, onEnded, 
                 if (playerRef.current) {
                     playerRef.current.mute();
                     playerRef.current.playVideo();
-                    setTimeout(() => {
+                    if (autoUnmuteTimerRef.current) clearTimeout(autoUnmuteTimerRef.current);
+                    autoUnmuteTimerRef.current = setTimeout(() => {
                         if (playerRef.current) {
                             playerRef.current.unMute();
                             playerRef.current.setVolume(100);
@@ -189,7 +199,8 @@ const YouTubePlayer = React.memo(({ className, onReady, onStateChange, onEnded, 
     useEffect(() => {
         if (restartTrigger > 0 && isPlayerReady()) {
             playerRef.current.seekTo(0, true);
-            setTimeout(() => playPlayer(), 100);
+            if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+            restartTimerRef.current = setTimeout(() => playPlayer(), 100);
         }
     }, [restartTrigger]);
 

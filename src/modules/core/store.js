@@ -24,6 +24,17 @@ export const useAppStore = create((set) => ({
         queue: state.queue.map((i) => (i.id === id ? { ...i, ...updates } : i))
     })),
     reorderQueue: (newQueue) => set({ queue: newQueue }),
+    // Manual reorder: save ordered IDs so Firebase sync preserves user's arrangement
+    // Persisted to localStorage so it survives F5
+    manualOrder: JSON.parse(localStorage.getItem('karaoke_manualOrder') || 'null'),
+    setManualOrder: (orderIds) => {
+        localStorage.setItem('karaoke_manualOrder', JSON.stringify(orderIds));
+        set({ manualOrder: orderIds });
+    },
+    clearManualOrder: () => {
+        localStorage.removeItem('karaoke_manualOrder');
+        set({ manualOrder: null });
+    },
 
     // Queue Mode
     queueMode: 'auto', // 'auto' | 'manual'

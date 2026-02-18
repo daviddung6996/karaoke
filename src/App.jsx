@@ -27,8 +27,26 @@ import LegacyBridge from './modules/core/LegacyBridge';
 
 const ControlPanel = () => {
 
-  // Get store actions
-  const { isPlaying, setIsPlaying, triggerRestart, queue, removeFromQueue, reorderQueue, setCurrentSong, currentSong, queueMode, toggleQueueMode, invitedSongId, setInvitedSongId, setWaitingForGuest, waitCountdown, setWaitCountdown, setCountdownPaused, setMicAttemptHint, addToHistory, loadHistory } = useAppStore();
+  // Granular store selectors — prevents cascading re-renders
+  const isPlaying = useAppStore((s) => s.isPlaying);
+  const setIsPlaying = useAppStore((s) => s.setIsPlaying);
+  const triggerRestart = useAppStore((s) => s.triggerRestart);
+  const queue = useAppStore((s) => s.queue);
+  const removeFromQueue = useAppStore((s) => s.removeFromQueue);
+  const reorderQueue = useAppStore((s) => s.reorderQueue);
+  const setCurrentSong = useAppStore((s) => s.setCurrentSong);
+  const currentSong = useAppStore((s) => s.currentSong);
+  const queueMode = useAppStore((s) => s.queueMode);
+  const toggleQueueMode = useAppStore((s) => s.toggleQueueMode);
+  const invitedSongId = useAppStore((s) => s.invitedSongId);
+  const setInvitedSongId = useAppStore((s) => s.setInvitedSongId);
+  const setWaitingForGuest = useAppStore((s) => s.setWaitingForGuest);
+  const waitCountdown = useAppStore((s) => s.waitCountdown);
+  const setWaitCountdown = useAppStore((s) => s.setWaitCountdown);
+  const setCountdownPaused = useAppStore((s) => s.setCountdownPaused);
+  const setMicAttemptHint = useAppStore((s) => s.setMicAttemptHint);
+  const addToHistory = useAppStore((s) => s.addToHistory);
+  const loadHistory = useAppStore((s) => s.loadHistory);
 
   // Session restore logic (F5 vs fresh session)
   const { isRefresh, isRestoredSong, setIsRestoredSong } = useSessionRestore(setCurrentSong, setIsPlaying, reorderQueue);
@@ -75,6 +93,9 @@ const ControlPanel = () => {
     handleNext();
   }, [queue, removeFromQueue, setCurrentSong, setIsPlaying, addToHistory]);
 
+  // Track whether first song of session has been played (to skip TTS only for the very first song)
+  const hasPlayedFirstSongRef = React.useRef(false);
+
   // Sync state to TV window & Firebase queue
   usePlayerSync('host', { onSongEnded: handleSongEnd });
   useFirebaseSync(isRefresh);
@@ -99,9 +120,17 @@ const ControlPanel = () => {
   React.useEffect(() => {
     if (!restoreComplete) return;
     if (!currentSong && queue.length > 0 && queueMode === 'auto') {
-      const nextSong = queue[0];
-      setCurrentSong(nextSong);
-      removeFromQueue(nextSong.id);
+      if (!hasPlayedFirstSongRef.current) {
+        // First song of session: stage it — no TTS, no mic detection, wait for manual "Phát"
+        const nextSong = { ...queue[0], isStaged: true };
+        setCurrentSong(nextSong);
+        removeFromQueue(nextSong.id);
+      } else {
+        // Subsequent songs: normal auto-play flow (TTS + mic detection)
+        const nextSong = queue[0];
+        setCurrentSong(nextSong);
+        removeFromQueue(nextSong.id);
+      }
     }
   }, [currentSong, queue, queueMode, setCurrentSong, removeFromQueue, restoreComplete]);
 
@@ -110,18 +139,19 @@ const ControlPanel = () => {
   const { waitForPresence, cancelDetection } = useMicDetection();
   const { isTVOpen, openTV, closeTV } = useTVWindow();
 
-  // Auto-start: ensure extend mode and open TV on secondary screen at launch
-  const autoStartedRef = React.useRef(false);
+  // Auto-start: default to YouTube (duplicate) mode — user manually switches to Karaoke
+  // Uses sessionStorage guard to ensure it only runs ONCE per browser session
   React.useEffect(() => {
-    if (autoStartedRef.current) return;
-    autoStartedRef.current = true;
-    fetch('/api/display/extend', { method: 'POST' })
-      .then(() => { setTimeout(() => openTV(), 1500); })
-      .catch(() => { openTV(); }); // Even if endpoint fails, try opening TV
-  }, [openTV]);
+    if (sessionStorage.getItem('__karaoke_auto_start__')) return;
+    sessionStorage.setItem('__karaoke_auto_start__', '1');
+
+    // Ensure duplicate mode on startup (YouTube on both screens, no TV popup)
+    fetch('/api/display/duplicate', { method: 'POST' }).catch(() => { });
+  }, []);
 
   const micAbortRef = React.useRef(null);
   const skipWaitRef = React.useRef(false);
+  const micHintTimerRef = React.useRef(null);
 
   // Sync currentSong to Firebase for customer-web
   const initialLoadRef = React.useRef(true);
@@ -167,18 +197,22 @@ const ControlPanel = () => {
     // If the current song is staged (waiting for manual start after a delete),
     // we simply un-stage it and start playing/announcing.
     if (currentSong?.isStaged) {
+      hasPlayedFirstSongRef.current = true;
       const activeSong = { ...currentSong, isStaged: false };
+      setAnnouncedSongId(activeSong.id); // Skip TTS — user manually started
       setCurrentSong(activeSong);
       setIsPlaying(true);
       return;
     }
 
-    // Logic handled by active effect above, but manual override needs care
+    // Manual trigger for first song (if effect didn't catch it yet or manual mode)
     if (!currentSong && queue.length > 0) {
-      // Manual trigger for first song (if effect didn't catch it yet or manual mode)
+      hasPlayedFirstSongRef.current = true;
       const nextSong = queue[0];
+      setAnnouncedSongId(nextSong.id); // Skip TTS — user manually started
       setCurrentSong(nextSong);
       removeFromQueue(nextSong.id);
+      setIsPlaying(true);
       return;
     }
     setIsPlaying(!isPlaying);
@@ -205,7 +239,7 @@ const ControlPanel = () => {
     // Random gentle templates
     const templates = [
       `Xin mời ${singer} lên sân khấu, trình bày ca khúc ${songName}`,
-      `${singer} ơi? Mời ${singer} lên sân khấu trình bày bài hát ${songName} của mình`,
+      `${singer} ơi . Mời ${singer} lên sân khấu trình bày bài hát ${songName} của mình`,
       `Tiếp theo chương trình, xin mời ${singer} gửi tặng mọi người ca khúc ${songName}`,
       `Một tràng pháo tay cho ${singer} với ca khúc ${songName}`,
       `Xin mời giọng ca ${singer} chuẩn bị cho bài hát ${songName}`,
@@ -272,6 +306,7 @@ const ControlPanel = () => {
 
     // 1. Stop playing immediately when new song loads
     setIsPlaying(false);
+    setCountdownPaused(false);
 
     // Cancel any previous mic detection
     if (micAbortRef.current) micAbortRef.current.abort();
@@ -296,7 +331,8 @@ const ControlPanel = () => {
       const reason = await waitForPresence(abortController.signal, setWaitCountdown, (level) => {
         setMicAttemptHint(level);
         // Auto-clear hint after 3s
-        setTimeout(() => setMicAttemptHint(null), 3000);
+        if (micHintTimerRef.current) clearTimeout(micHintTimerRef.current);
+        micHintTimerRef.current = setTimeout(() => setMicAttemptHint(null), 3000);
       });
       setWaitingForGuest(false);
       setMicAttemptHint(null);
@@ -461,7 +497,7 @@ const ControlPanel = () => {
             {/* Play/Pause */}
             <button
               onClick={handlePlayPause}
-              className={`flex-1 py-4 px-6 rounded-xl flex items-center justify-center gap-3 transition-all active:scale-95 shadow-lg shadow-indigo-200/50 cursor-pointer ${isPlaying
+              className={`flex-1 py-4 px-6 rounded-xl flex items-center justify-center gap-3 transition-colors active:scale-95 shadow-sm cursor-pointer ${isPlaying
                 ? 'bg-slate-200 text-slate-600 border border-slate-300 hover:bg-slate-300'
                 : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
             >
@@ -473,7 +509,7 @@ const ControlPanel = () => {
             <button
               onClick={() => { logCurrentSongToHistory(); handleNext(); }}
               disabled={queue.length === 0}
-              className="flex-1 py-4 px-6 rounded-xl flex items-center justify-center gap-3 bg-slate-800 text-white transition-all active:scale-95 shadow-lg shadow-slate-400/50 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-900"
+              className="flex-1 py-4 px-6 rounded-xl flex items-center justify-center gap-3 bg-slate-800 text-white transition-colors active:scale-95 shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-900"
             >
               <SkipForward size={28} fill="currentColor" />
               <span className="text-xl font-black uppercase tracking-tight">Qua Bài</span>
@@ -483,7 +519,7 @@ const ControlPanel = () => {
             <button
               onClick={handleReplay}
               disabled={!currentSong}
-              className="flex-1 py-4 px-6 rounded-xl flex items-center justify-center gap-3 bg-orange-500 text-white transition-all active:scale-95 shadow-lg shadow-orange-200/50 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-orange-600"
+              className="flex-1 py-4 px-6 rounded-xl flex items-center justify-center gap-3 bg-orange-500 text-white transition-colors active:scale-95 shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-orange-600"
             >
               <RotateCcw size={28} />
               <span className="text-xl font-black uppercase tracking-tight">Phát Lại</span>
@@ -493,7 +529,7 @@ const ControlPanel = () => {
             <button
               onClick={handleClearSong}
               disabled={!currentSong}
-              className="flex-1 py-4 px-6 rounded-xl flex items-center justify-center gap-3 bg-red-500 text-white transition-all active:scale-95 shadow-lg shadow-red-200/50 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-red-600"
+              className="flex-1 py-4 px-6 rounded-xl flex items-center justify-center gap-3 bg-red-500 text-white transition-colors active:scale-95 shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-red-600"
             >
               <Square size={28} fill="currentColor" />
               <span className="text-xl font-black uppercase tracking-tight">Xóa Bài</span>

@@ -43,6 +43,8 @@ export const usePlayerSync = (role = 'host', { onSongEnded } = {}) => {
     const channelRef = useRef(null);
     const projectionSongRef = useRef(null);
     const stopAutoplayRef = useRef(null);
+    // Track pending wait intervals/timeouts for cleanup on unmount
+    const pendingTimersRef = useRef(new Set());
 
     // --- Get or create persistent channel ---
     const getChannel = useCallback(() => {
@@ -106,10 +108,18 @@ export const usePlayerSync = (role = 'host', { onSongEnded } = {}) => {
                         const waitForReady = setInterval(() => {
                             if (isPlayerReady()) {
                                 clearInterval(waitForReady);
+                                pendingTimersRef.current.delete(waitForReady);
+                                pendingTimersRef.current.delete(waitTimeout);
                                 doUnmute();
                             }
                         }, 300);
-                        setTimeout(() => clearInterval(waitForReady), 10000);
+                        const waitTimeout = setTimeout(() => {
+                            clearInterval(waitForReady);
+                            pendingTimersRef.current.delete(waitForReady);
+                            pendingTimersRef.current.delete(waitTimeout);
+                        }, 10000);
+                        pendingTimersRef.current.add(waitForReady);
+                        pendingTimersRef.current.add(waitTimeout);
                     }
                     break;
                 }
@@ -176,12 +186,20 @@ export const usePlayerSync = (role = 'host', { onSongEnded } = {}) => {
                             const waitForPlayer = setInterval(() => {
                                 if (isPlayerReady()) {
                                     clearInterval(waitForPlayer);
+                                    pendingTimersRef.current.delete(waitForPlayer);
+                                    pendingTimersRef.current.delete(waitPlayerTimeout);
                                     playPlayer();
                                     setTimeout(() => unmutePlayer(), 300);
                                     setIsPlaying(true);
                                 }
                             }, 300);
-                            setTimeout(() => clearInterval(waitForPlayer), 10000);
+                            const waitPlayerTimeout = setTimeout(() => {
+                                clearInterval(waitForPlayer);
+                                pendingTimersRef.current.delete(waitForPlayer);
+                                pendingTimersRef.current.delete(waitPlayerTimeout);
+                            }, 10000);
+                            pendingTimersRef.current.add(waitForPlayer);
+                            pendingTimersRef.current.add(waitPlayerTimeout);
                         }
                     }
                     setWaitingForGuest(waiting);
@@ -203,7 +221,7 @@ export const usePlayerSync = (role = 'host', { onSongEnded } = {}) => {
         // Request full state from host on mount
         channel.postMessage({ type: 'REQUEST_SYNC' });
 
-        // Broadcast time to host every 2s (reduced from 1s for bandwidth)
+        // Broadcast time to host every 3s (reduced for bandwidth)
         const interval = setInterval(() => {
             if (isPlayerReady()) {
                 sendMessage('SYNC_TIME', {
@@ -211,10 +229,20 @@ export const usePlayerSync = (role = 'host', { onSongEnded } = {}) => {
                     duration: getDuration()
                 });
             }
-        }, 2000);
+        }, 3000);
 
         return () => {
             clearInterval(interval);
+            // Clean up all pending wait intervals/timeouts
+            pendingTimersRef.current.forEach(id => {
+                clearInterval(id);
+                clearTimeout(id);
+            });
+            pendingTimersRef.current.clear();
+            if (stopAutoplayRef.current) {
+                clearInterval(stopAutoplayRef.current);
+                stopAutoplayRef.current = null;
+            }
             channel.close();
             channelRef.current = null;
         };

@@ -73,8 +73,8 @@ export function generatePlayQueue(customerQueues) {
         }
     }
 
-    // Priority songs: FIFO — người ưu tiên trước hát trước
-    prioritySongs.sort((a, b) => (a.addedAt || 0) - (b.addedAt || 0));
+    // Priority songs: LIFO — bài ưu tiên sau lên đầu (hát trước)
+    prioritySongs.sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
 
     // Sort customers by arrival order (who came to the session first)
     customers.sort((a, b) => a.firstOrderTime - b.firstOrderTime);

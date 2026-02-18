@@ -1,7 +1,5 @@
 
-const API_KEY = import.meta.env.VITE_GEMINI_KEY;
-const MODEL = 'gemini-2.5-flash';
-const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
+// Gemini API calls are proxied through Vite server to keep the API key server-side
 
 // Helper to clean JSON string
 const cleanJSON = (text) => {
@@ -68,14 +66,10 @@ Quy tắc:
 
 // Core fetch function (internal)
 const fetchGeminiRaw = async (input, signal) => {
-    if (!API_KEY) {
-        console.error("Gemini Service: Missing API Key - check VITE_GEMINI_KEY in .env");
-        return null;
-    }
     if (!input || input.trim().length < 2) return null;
 
     try {
-        const response = await fetch(`${API_URL}?key=${API_KEY}`, {
+        const response = await fetch('/api/gemini/suggest', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -187,11 +181,10 @@ Quy tắc:
 Output format: ["Tên 1", "Tên 2", "Tên 3"]`;
 
 export const getGuestNameSuggestions = async (input, signal) => {
-    if (!API_KEY) return [];
     if (!input || input.trim().length < 2) return [];
 
     try {
-        const response = await fetch(`${API_URL}?key=${API_KEY}`, {
+        const response = await fetch('/api/gemini/guest-names', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -240,10 +233,10 @@ Rules:
 5. Capitalize correctly.`;
 
 export const cleanSongTitle = async (rawTitle) => {
-    if (!API_KEY || !rawTitle) return null;
+    if (!rawTitle) return null;
 
     try {
-        const response = await fetch(`${API_URL}?key=${API_KEY}`, {
+        const response = await fetch('/api/gemini/clean-title', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

@@ -49,38 +49,33 @@ const SearchBar = ({ isExpanded = false }) => {
     const { suggestions, isLoading: isSuggesting } = useSuggestions(query, isFocused);
     const { addToQueue, updateQueueItem, queueMode } = useAppStore();
 
-    const GEMINI_KEY = import.meta.env.VITE_GEMINI_KEY;
-
-    // Transcribe audio via Gemini API
+    // Transcribe audio via Gemini API (proxied through server)
     const transcribeWithGemini = async (audioBlob) => {
         const buffer = await audioBlob.arrayBuffer();
         const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
 
-        const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{
-                        parts: [
-                            {
-                                inlineData: {
-                                    mimeType: audioBlob.type || 'audio/webm',
-                                    data: base64
-                                }
-                            },
-                            { text: 'Transcribe this Vietnamese audio. Return ONLY the spoken text, nothing else. If no speech is detected, return empty string.' }
-                        ]
-                    }],
-                    generationConfig: {
-                        max_output_tokens: 200,
-                        temperature: 0.1,
-                        thinkingConfig: { thinkingBudget: 0 }
-                    }
-                })
-            }
-        );
+        const response = await fetch('/api/gemini/transcribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{
+                    parts: [
+                        {
+                            inlineData: {
+                                mimeType: audioBlob.type || 'audio/webm',
+                                data: base64
+                            }
+                        },
+                        { text: 'Transcribe this Vietnamese audio. Return ONLY the spoken text, nothing else. If no speech is detected, return empty string.' }
+                    ]
+                }],
+                generationConfig: {
+                    max_output_tokens: 200,
+                    temperature: 0.1,
+                    thinkingConfig: { thinkingBudget: 0 }
+                }
+            })
+        });
 
         if (!response.ok) throw new Error(`Gemini API error: ${response.status}`);
         const data = await response.json();
@@ -160,7 +155,6 @@ const SearchBar = ({ isExpanded = false }) => {
 
     // === Gemini fallback (only for browsers without Web Speech API) ===
     const startGeminiFallback = useCallback(async () => {
-        if (!GEMINI_KEY) return;
 
         if (streamRef.current) {
             streamRef.current.getTracks().forEach(t => t.stop());
@@ -224,7 +218,7 @@ const SearchBar = ({ isExpanded = false }) => {
                 setVoiceStatus('');
             }, 1500);
         }
-    }, [GEMINI_KEY]);
+    }, []);
 
     const startVoiceSearch = useCallback(() => {
         if (useGeminiFallback.current) {
@@ -535,7 +529,7 @@ const SearchBar = ({ isExpanded = false }) => {
                             <div className={`relative ${isExpanded ? 'w-full aspect-video rounded-lg' : 'w-14 h-10 rounded-md'} overflow-hidden bg-slate-200 flex-shrink-0`}>
                                 <img src={result.thumbnail} alt="" className="w-full h-full object-cover" loading="lazy" />
                                 {result.duration && (
-                                    <span className="absolute bottom-1 right-1 bg-black/70 text-white text-[10px] font-bold px-1 py-0.5 rounded backdrop-blur-sm">
+                                    <span className="absolute bottom-1 right-1 bg-black/80 text-white text-[10px] font-bold px-1 py-0.5 rounded">
                                         {result.duration}
                                     </span>
                                 )}
@@ -607,7 +601,7 @@ const SearchBar = ({ isExpanded = false }) => {
 
             {/* Voice Search Overlay */}
             {isListening && (
-                <div className="fixed inset-0 z-[9999] bg-white/95 backdrop-blur-sm flex flex-col items-center justify-center">
+                <div className="fixed inset-0 z-[9999] bg-white flex flex-col items-center justify-center">
                     {/* Mic button with ripple */}
                     <div className="relative mb-8">
                         {voiceStatus === 'listening' && !voiceError && (

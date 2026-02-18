@@ -63,6 +63,44 @@ export default defineConfig(({ mode }) => {
             return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D");
           };
 
+          // ── Gemini API Proxy (keeps API key server-side) ──
+          const GEMINI_KEY = env.VITE_GEMINI_KEY;
+          const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+
+          const parseBody = (req) => new Promise((resolve) => {
+            let body = '';
+            req.on('data', chunk => { body += chunk; });
+            req.on('end', () => resolve(body));
+          });
+
+          const geminiProxy = async (req, res, next) => {
+            if (req.method !== 'POST') return next();
+            if (!GEMINI_KEY) {
+              res.statusCode = 500;
+              return res.end(JSON.stringify({ error: 'GEMINI_KEY not configured' }));
+            }
+            try {
+              const body = await parseBody(req);
+              const response = await fetch(`${GEMINI_URL}?key=${GEMINI_KEY}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body,
+              });
+              const data = await response.text();
+              res.statusCode = response.status;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(data);
+            } catch (e) {
+              res.statusCode = 500;
+              res.end(JSON.stringify({ error: e.message }));
+            }
+          };
+
+          server.middlewares.use('/api/gemini/suggest', geminiProxy);
+          server.middlewares.use('/api/gemini/clean-title', geminiProxy);
+          server.middlewares.use('/api/gemini/guest-names', geminiProxy);
+          server.middlewares.use('/api/gemini/transcribe', geminiProxy);
+
           // ── Display Mode State ──
           let currentDisplayMode = 'extend';
 
@@ -91,11 +129,7 @@ export default defineConfig(({ mode }) => {
               if (err) console.warn('[Display] clone failed:', err.message);
               currentDisplayMode = 'duplicate';
               // Wait 2s for display to stabilize, then open YouTube
-              setTimeout(() => {
-                exec('start https://www.youtube.com', (e) => {
-                  if (e) console.warn('[Display] open YouTube failed:', e.message);
-                });
-              }, 2000);
+
               res.setHeader('Content-Type', 'application/json');
               res.end(JSON.stringify({ mode: 'duplicate' }));
             });
@@ -353,6 +387,19 @@ export default defineConfig(({ mode }) => {
         }
       }
     ],
+    build: {
+      target: 'es2020',
+      minify: 'esbuild',
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            vendor: ['react', 'react-dom', 'react-router-dom'],
+            framer: ['framer-motion'],
+            youtube: ['react-youtube'],
+          }
+        }
+      }
+    },
     server: {
       port: 5176,
       strictPort: true,

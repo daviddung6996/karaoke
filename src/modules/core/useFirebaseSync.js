@@ -39,7 +39,38 @@ export function useFirebaseSync(isRefresh) {
                 isPriority: item.isPriority
             }));
 
-            reorderQueue(appQueueItems);
+            // If user has manually reordered, preserve their arrangement
+            const { manualOrder } = useAppStore.getState();
+            if (manualOrder && manualOrder.length > 0) {
+                const itemMap = new Map(appQueueItems.map(item => [item.id, item]));
+
+                // Rebuild queue: manual-ordered items first (skip removed ones)
+                const ordered = [];
+                const placed = new Set();
+                for (const id of manualOrder) {
+                    const item = itemMap.get(id);
+                    if (item) {
+                        ordered.push(item);
+                        placed.add(id);
+                    }
+                }
+                // New items from Firebase: priority → top, normal → bottom
+                const newPriority = [];
+                const newNormal = [];
+                for (const item of appQueueItems) {
+                    if (!placed.has(item.id)) {
+                        if (item.isPriority) newPriority.push(item);
+                        else newNormal.push(item);
+                    }
+                }
+                ordered.unshift(...newPriority);
+                ordered.push(...newNormal);
+
+                reorderQueue(ordered);
+            } else {
+                reorderQueue(appQueueItems);
+            }
+
             setFirebaseInitialized(true);
         });
 

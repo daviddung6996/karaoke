@@ -3,6 +3,10 @@ import { createPortal } from 'react-dom';
 import { Mic, Pause, Play } from 'lucide-react';
 import { useAppStore } from '../core/store';
 
+// Static styles hoisted outside component to avoid re-creation per render
+const ORB_STYLE = { left: '30%', width: '350px', height: '350px', animationDelay: '0s' };
+const RING_STYLE = { animationDelay: '0s' };
+
 const WaitingOverlay = ({ countdown: propCountdown, onSkip, onPauseToggle }) => {
     const waitingForGuest = useAppStore((s) => s.waitingForGuest);
     const currentSong = useAppStore((s) => s.currentSong);
@@ -35,10 +39,29 @@ const WaitingOverlay = ({ countdown: propCountdown, onSkip, onPauseToggle }) => 
             {/* ── Root Overlay ── */}
             {entered && createPortal(
                 <div className={`inv-overlay ${entered ? 'inv-overlay--entered' : ''}`}>
-                    {/* Background Orbs */}
+                    {/* Background Orb — single orb for perf */}
                     <div className="inv-orbs">
-                        <div className="inv-orb" style={{ left: '20%', width: '300px', height: '300px', animationDelay: '0s' }} />
-                        <div className="inv-orb" style={{ left: '70%', width: '400px', height: '400px', animationDelay: '-5s' }} />
+                        <div className="inv-orb" style={ORB_STYLE} />
+                    </div>
+
+                    {/* Top-right corner: countdown + pause + start */}
+                    <div className="inv-top-controls">
+                        <div className="inv-countdown-row">
+                            <span className="inv-countdown-num">{countdown}s</span>
+                            {onPauseToggle && (
+                                <button className="inv-pause-btn" onClick={(e) => { e.stopPropagation(); onPauseToggle?.(); }}>
+                                    {countdownPaused ? <Play size={16} fill="currentColor" /> : <Pause size={16} fill="currentColor" />}
+                                    {countdownPaused ? 'Tiếp Tục' : 'Dừng Đếm'}
+                                </button>
+                            )}
+                        </div>
+                        <button className="inv-start-btn" onClick={onSkip}>
+                            BẮT ĐẦU NGAY <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M5 12l14 0" />
+                                <path d="M13 18l6 -6" />
+                                <path d="M13 6l6 6" />
+                            </svg>
+                        </button>
                     </div>
 
                     {/* Main Content (Centered & Expanded) */}
@@ -46,7 +69,7 @@ const WaitingOverlay = ({ countdown: propCountdown, onSkip, onPauseToggle }) => 
                         {/* Mic & Rings */}
                         <div className="inv-mic-wrap" onClick={onSkip}>
                             <div className="inv-rings">
-                                <div className="inv-ring" style={{ animationDelay: '0s' }} />
+                                <div className="inv-ring" style={RING_STYLE} />
                             </div>
                             <svg className="inv-countdown-svg" viewBox="0 0 100 100">
                                 <circle cx="50" cy="50" r="48" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="3" />
@@ -70,34 +93,13 @@ const WaitingOverlay = ({ countdown: propCountdown, onSkip, onPauseToggle }) => 
                         <div className="inv-song">
                             TRÌNH BÀY BÀI HÁT: <span className="inv-song-title">{songTitle}</span>
                         </div>
+                    </div>
 
+                    {/* Footer — instruction text pinned to bottom */}
+                    <div className="inv-footer">
                         <p className="inv-instruction">
                             Gõ nhẹ vào mic hoặc nói <span className="inv-alo">A Lô</span> để bắt đầu
                         </p>
-                    </div>
-
-                    {/* Footer Controls (Bottom Pinned) */}
-                    <div className="inv-footer">
-                        {/* Countdown & Pause */}
-                        <div className="inv-countdown-row">
-                            <span className="inv-countdown-text">Tự động phát sau</span>
-                            <span className="inv-countdown-num">{countdown} giây</span>
-                            {onPauseToggle && (
-                                <button className="inv-pause-btn" onClick={(e) => { e.stopPropagation(); onPauseToggle?.(); }}>
-                                    {countdownPaused ? <Play size={16} fill="currentColor" /> : <Pause size={16} fill="currentColor" />}
-                                    {countdownPaused ? 'Tiếp Tục' : 'Dừng Đếm'}
-                                </button>
-                            )}
-                        </div>
-
-                        {/* Manual Start Button */}
-                        <button className="inv-start-btn" onClick={onSkip}>
-                            BẮT ĐẦU NGAY <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M5 12l14 0" />
-                                <path d="M13 18l6 -6" />
-                                <path d="M13 6l6 6" />
-                            </svg>
-                        </button>
                     </div>
                 </div>,
                 document.body

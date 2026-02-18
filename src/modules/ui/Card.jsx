@@ -4,9 +4,9 @@ const Card = ({ children, className, glass = false, ...props }) => {
     return (
         <div
             className={twMerge(
-                "rounded-3xl p-6 transition-all duration-300",
+                "rounded-3xl p-6 transition-shadow duration-200",
                 glass
-                    ? "bg-white/40 backdrop-blur-xl border border-white/60"
+                    ? "bg-white/90 border border-white/60"
                     : "bg-white border border-slate-100",
                 className
             )}

@@ -24,12 +24,17 @@ const PlayerControls = () => {
     const prevVolumeRef = useRef(100);
 
     // Snap to 0 when restart triggered
+    const restartTimerRef = useRef(null);
     useEffect(() => {
         if (restartTrigger > 0) {
             isRestartingRef.current = true;
             setCurrentTime(0);
-            setTimeout(() => { isRestartingRef.current = false; }, 1000);
+            if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+            restartTimerRef.current = setTimeout(() => { isRestartingRef.current = false; }, 1000);
         }
+        return () => {
+            if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+        };
     }, [restartTrigger]);
 
     // Tick: poll time at 1fps (sufficient for progress bar)

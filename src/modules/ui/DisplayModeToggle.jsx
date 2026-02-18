@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAppStore } from '../core/store';
 
 const DisplayModeToggle = ({ openTV, closeTV, isTVOpen }) => {
-    const [mode, setMode] = useState('extend');
+    const [mode, setMode] = useState('duplicate');
     const [loading, setLoading] = useState(false);
 
     useEffect(() => {
@@ -12,6 +12,7 @@ const DisplayModeToggle = ({ openTV, closeTV, isTVOpen }) => {
             .catch(() => { });
     }, []);
 
+    const switchTimerRef = useRef(null);
     const switchMode = useCallback(async (newMode) => {
         if (newMode === mode || loading) return;
         setLoading(true);
@@ -24,11 +25,12 @@ const DisplayModeToggle = ({ openTV, closeTV, isTVOpen }) => {
             const data = await res.json();
             setMode(data.mode);
             if (newMode === 'extend') {
-                setTimeout(() => {
+                if (switchTimerRef.current) clearTimeout(switchTimerRef.current);
+                switchTimerRef.current = setTimeout(() => {
                     openTV();
                     const { currentSong } = useAppStore.getState();
                     if (currentSong) useAppStore.getState().setIsPlaying(true);
-                }, 2500);
+                }, 3000);
             }
         } catch {
             // Switch failed
