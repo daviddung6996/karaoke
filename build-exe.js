@@ -17,15 +17,17 @@ execSync('npm run build', { stdio: 'inherit', cwd: __dirname });
 
 console.log('📦 Step 2: Creating portable package...');
 
-// Clean & create output
-if (fs.existsSync(OUT)) fs.rmSync(OUT, { recursive: true });
+// Clean dist/ and node_modules/ only — preserve server.js and scripts
 fs.mkdirSync(OUT, { recursive: true });
+const distOut = path.join(OUT, 'dist');
+if (fs.existsSync(distOut)) fs.rmSync(distOut, { recursive: true });
+const nmOut = path.join(OUT, 'node_modules');
+if (fs.existsSync(nmOut)) fs.rmSync(nmOut, { recursive: true });
 
-// Copy dist/
-copyDir(path.join(__dirname, 'dist'), path.join(OUT, 'dist'));
+// Copy fresh dist/
+copyDir(path.join(__dirname, 'dist'), distOut);
 
-// Copy server.js
-fs.copyFileSync(path.join(__dirname, 'server.js'), path.join(OUT, 'server.js'));
+// server.js is maintained directly in karaoke-portable/ — no copy needed
 
 // Create minimal package.json for the portable version
 const pkg = {
