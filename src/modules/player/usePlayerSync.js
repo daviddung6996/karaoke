@@ -4,24 +4,34 @@ import { getPlayerTime, getDuration, getPlayer, isPlayerReady, setVolume, mutePl
 
 const CHANNEL_NAME = 'karaoke_sync_channel';
 
+// Stable no-op selectors — TV uses these to avoid re-renders from host-only state
+const _NO = () => null;
+const _ZERO = () => 0;
+const _FALSE = () => false;
+
 /**
  * Sync hook – Host is the "commander", TV is the "player".
- * 
- * Logic:
- * 1. TV loads the video and plays it.
- * 2. TV broadcasts SYNC_TIME every second to Host.
- * 3. TV broadcasts SONG_ENDED when video finishes.
- * 4. Host uses remote time for progress bar.
+ *
+ * PERF: Host and TV share the same renderer process (same origin, window.open).
+ * TV must NOT subscribe to state it doesn't render (queue, countdown, volume, etc.)
+ * otherwise host operations cause TV re-renders → iframe reconciliation → video stutter.
  */
 export const usePlayerSync = (role = 'host', { onSongEnded } = {}) => {
-    const currentSong = useAppStore((s) => s.currentSong);
+    const isHost = role === 'host';
+
+    // Both roles need these (TV uses for waitingForGuest transition)
     const isPlaying = useAppStore((s) => s.isPlaying);
     const waitingForGuest = useAppStore((s) => s.waitingForGuest);
-    const waitCountdown = useAppStore((s) => s.waitCountdown);
-    const countdownPaused = useAppStore((s) => s.countdownPaused);
-    const micAttemptHint = useAppStore((s) => s.micAttemptHint);
-    const restartTrigger = useAppStore((s) => s.restartTrigger);
-    const queue = useAppStore((s) => s.queue);
+
+    // Host-only reactive state — TV gets stable dummy values (no re-renders)
+    const currentSong = useAppStore(isHost ? (s) => s.currentSong : _NO);
+    const waitCountdown = useAppStore(isHost ? (s) => s.waitCountdown : _ZERO);
+    const countdownPaused = useAppStore(isHost ? (s) => s.countdownPaused : _FALSE);
+    const micAttemptHint = useAppStore(isHost ? (s) => s.micAttemptHint : _NO);
+    const restartTrigger = useAppStore(isHost ? (s) => s.restartTrigger : _ZERO);
+    const queue = useAppStore(isHost ? (s) => s.queue : _NO);
+
+    // Setters are stable references — safe to subscribe from both roles
     const setCurrentSong = useAppStore((s) => s.setCurrentSong);
     const setIsPlaying = useAppStore((s) => s.setIsPlaying);
     const setWaitingForGuest = useAppStore((s) => s.setWaitingForGuest);
@@ -334,9 +344,9 @@ export const usePlayerSync = (role = 'host', { onSongEnded } = {}) => {
         sendMessage('MIC_ATTEMPT', micAttemptHint);
     }, [role, micAttemptHint, sendMessage]);
 
-    // [New] Send Volume
-    const volume = useAppStore((s) => s.volume);
-    const isMuted = useAppStore((s) => s.isMuted);
+    // Send Volume (host-only subscription)
+    const volume = useAppStore(isHost ? (s) => s.volume : _ZERO);
+    const isMuted = useAppStore(isHost ? (s) => s.isMuted : _FALSE);
 
     // Debounce/check previous for volume
     const prevVolumeRef = useRef(100);

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAppStore } from '../core/store';
 import { cleanYoutubeTitle } from '../../utils/titleUtils';
-import { Music, Mic, SkipForward } from 'lucide-react';
+import { Mic, SkipForward } from 'lucide-react';
 
 const MarqueeOverlay = React.memo(() => {
     const currentSong = useAppStore((s) => s.currentSong);
@@ -68,40 +68,40 @@ const MarqueeOverlay = React.memo(() => {
 
     return (
         <div
-            className="absolute top-0 left-0 right-0 z-50 pointer-events-none flex justify-center px-6 pt-5"
+            className="absolute top-0 left-0 right-0 z-50 pointer-events-none flex justify-center px-8 pt-8"
             style={{
                 opacity: isVisible ? 1 : 0,
                 transform: isVisible ? 'translateY(0)' : 'translateY(-100%)',
                 transition: 'opacity 0.5s ease, transform 0.5s ease',
             }}
         >
-            <div className="flex items-stretch gap-0 max-w-[90vw] rounded-2xl overflow-hidden" style={{ boxShadow: '0 8px 32px rgba(0,0,0,0.6)' }}>
+            <div className="flex items-stretch gap-0 w-[95vw] max-w-[95vw] rounded-3xl overflow-hidden bg-black/85 border border-white/10">
                 {/* Current song */}
-                <div className="flex items-center gap-4 bg-black/80 px-7 py-4 min-w-0">
-                    <div className="w-12 h-12 rounded-xl bg-yellow-400/20 flex items-center justify-center flex-shrink-0">
-                        <Mic size={24} className="text-yellow-400" />
+                <div className="flex-1 w-1/2 flex items-center gap-6 px-8 py-7 min-w-0 border-r border-white/10">
+                    <div className="w-20 h-20 rounded-2xl bg-yellow-500/20 flex items-center justify-center flex-shrink-0">
+                        <Mic size={40} className="text-yellow-400 drop-shadow-md" />
                     </div>
-                    <div className="min-w-0">
-                        <div className="text-yellow-400 text-xs font-bold uppercase tracking-widest leading-none mb-1.5">ĐANG HÁT</div>
-                        <div className="text-white font-black text-2xl uppercase truncate max-w-[35vw] leading-tight">{songTitle}</div>
-                        <div className="text-white/60 text-sm font-bold uppercase tracking-wide mt-0.5">{singer}</div>
+                    <div className="min-w-0 flex flex-col justify-center flex-1">
+                        <div className="text-yellow-500 text-lg font-bold uppercase tracking-[0.2em] leading-none mb-2">ĐANG HÁT</div>
+                        <div className="text-white font-black text-4xl uppercase line-clamp-2 w-full leading-[1.1] break-words">{songTitle}</div>
+                        <div className="text-yellow-300 text-3xl font-extrabold uppercase tracking-wide mt-2 truncate">{singer}</div>
                     </div>
                 </div>
 
                 {/* Next song */}
-                <div className="flex items-center gap-4 bg-indigo-900/80 px-7 py-4 min-w-0">
-                    <div className="w-12 h-12 rounded-xl bg-indigo-400/20 flex items-center justify-center flex-shrink-0">
-                        <SkipForward size={24} className="text-indigo-300" />
+                <div className="flex-1 w-1/2 flex items-center gap-6 bg-indigo-950/40 px-8 py-7 min-w-0">
+                    <div className="w-20 h-20 rounded-2xl bg-indigo-500/20 flex items-center justify-center flex-shrink-0">
+                        <SkipForward size={36} className="text-indigo-300" />
                     </div>
-                    <div className="min-w-0">
-                        <div className="text-indigo-300 text-xs font-bold uppercase tracking-widest leading-none mb-1.5">TIẾP THEO</div>
+                    <div className="min-w-0 flex flex-col justify-center flex-1">
+                        <div className="text-indigo-300 text-sm font-bold uppercase tracking-widest leading-none mb-2">TIẾP THEO</div>
                         {nextVideoId ? (
                             <>
-                                <div className="text-white font-black text-2xl uppercase truncate max-w-[30vw] leading-tight">{nextTitle}</div>
-                                <div className="text-white/60 text-sm font-bold uppercase tracking-wide mt-0.5">{nextAddedBy || 'Khách'}</div>
+                                <div className="text-white/90 font-bold text-3xl uppercase line-clamp-2 w-full leading-tight break-words">{nextTitle}</div>
+                                <div className="text-white text-2xl font-bold uppercase tracking-wide mt-1 truncate">{nextAddedBy || 'Khách'}</div>
                             </>
                         ) : (
-                            <div className="text-white/50 font-bold text-base uppercase">Chúc bà con hát vui vẻ!</div>
+                            <div className="text-white/50 font-bold text-xl uppercase">Chúc bà con hát vui vẻ!</div>
                         )}
                     </div>
                 </div>

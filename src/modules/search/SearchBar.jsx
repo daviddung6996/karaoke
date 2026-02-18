@@ -331,9 +331,11 @@ const SearchBar = ({ isExpanded = false }) => {
         }
 
         // 1. Push to Firebase FIRST (priority for sync)
+        // Each guest name gets their own round-robin slot for fairness
         let firebaseKey = null;
         try {
-            const { pushToFirebaseQueue } = await import('../../services/firebaseQueueService');
+            const { pushToFirebaseQueue, guestNameToCustomerKey } = await import('../../services/firebaseQueueService');
+            const customerKey = guestNameToCustomerKey(guestName);
             const result = await pushToFirebaseQueue({
                 videoId: selectedTrack.videoId,
                 title: rawTitle,
@@ -342,7 +344,7 @@ const SearchBar = ({ isExpanded = false }) => {
                 addedBy: guestName,
                 thumbnail: selectedTrack.thumbnail,
                 isPriority: isPriority
-            });
+            }, customerKey);
             firebaseKey = result?.key; // Get Firebase key
         } catch (err) {
             console.warn('Firebase push failed, will add locally:', err);
@@ -491,7 +493,8 @@ const SearchBar = ({ isExpanded = false }) => {
                     <button
                         onClick={() => {
                             const searchQ = query.trim() || 'karaoke';
-                            window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(searchQ + ' karaoke')}`, '_blank', 'noopener');
+                            const ytQuery = searchQ.toLowerCase().includes('karaoke') ? searchQ : `${searchQ} karaoke`;
+                            window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(ytQuery)}`, '_blank', 'noopener');
                         }}
                         className="px-2 py-0.5 bg-red-600 hover:bg-red-700 text-white rounded-full text-[10px] font-bold transition-all whitespace-nowrap cursor-pointer active:scale-95 flex items-center gap-1"
                     >

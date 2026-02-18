@@ -102,6 +102,30 @@ Shared across apps (must be in `.env` and `customer-web/.env`):
 - `VITE_FIREBASE_DATABASE_URL`: Firebase Realtime DB URL.
 - `VITE_FIREBASE_PROJECT_ID`: Firebase project ID.
 
+## 9. Secondary Monitor Fullscreen (Borderless Popup Strategy)
+
+### 9.1 The "Secret"
+Instead of fighting with the strict `requestFullscreen()` API (which fails without clicks) or unstable server hacks, we use a **Borderless Popup** approach that leverages the browser's native window management.
+
+### 9.2 Mechanism
+1.  **Physical Dimensions:** We open the popup using `screen.width` and `screen.height` (physical pixels), **NOT** `availWidth` (which subtracts the taskbar).
+2.  **Precise Targeting:** `window.open` places the window exactly at `left=X, top=Y` of the secondary monitor.
+3.  **The "Toggle" Trick (Auto-Fix):**
+    - Sometimes the OS taskbar might stay on top initially.
+    - **Switching Modes** (e.g., YouTube <-> Karaoke) triggers `openTV()` again on the *same* window name (`'karaoke_tv'`).
+    - This forces the browser to **re-apply** the dimensions (`width/height`) to the existing window.
+    - This "refresh" action snaps the window **over the Windows Taskbar**, creating a perfect **Borderless Fullscreen** experience.
+
+**Why it's better:**
+- **Zero Clicks:** No user gesture needed on the TV side.
+- **Crash-Proof:** Uses standard web APIs, no external scripts or fragile hacks.
+- **Reliable:** It's "Soft Fullscreen" — looks like F11, but behaves like a robust native window.
+
+### 9.3 The "Must-Have" Extension
+For the best result, install **Automatic Fullscreen**:
+- **Link**: [Automatic Fullscreen](https://chromewebstore.google.com/detail/automatic-fullscreen/cflkfeodinanncgojjjfdglaobdkhhob)
+- **Why**: It is a "must-have weapon" to force fullscreen effectively, replacing unstable browser tricks.
+
 ## 8. TV Autoplay Architecture (CRITICAL — Read Before Touching Player Code)
 
 ### 8.1 The Problem

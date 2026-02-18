@@ -11,6 +11,8 @@ import WaitingOverlay from './modules/player/WaitingOverlay';
 import PlayerControls from './modules/player/PlayerControls';
 import DisplayModeToggle from './modules/ui/DisplayModeToggle';
 
+import HistoryButton from './modules/queue/HistoryButton';
+import HistoryModal from './modules/queue/HistoryModal';
 import { Search, Play, Pause, SkipForward, RotateCcw, Square } from 'lucide-react';
 import { useAppStore } from './modules/core/store';
 import { useTTS } from './modules/core/useTTS';
@@ -18,25 +20,44 @@ import { useMicDetection } from './modules/core/useMicDetection';
 import { cleanYoutubeTitle } from './utils/titleUtils';
 import { useTVWindow } from './modules/core/useTVWindow';
 import { useFirebaseSync } from './modules/core/useFirebaseSync';
-import { useSessionRestore, saveCurrentSongToSession } from './modules/core/useSessionRestore';
-import { setNowPlaying, clearNowPlaying, removeFromFirebaseQueue } from './services/firebaseQueueService';
+import { useSessionRestore, saveCurrentSongToSession, saveQueueToSession } from './modules/core/useSessionRestore';
+import { setNowPlaying, clearNowPlaying, completeSong, updateNowPlayingProgress } from './services/firebaseQueueService';
+import { getPlayerTime, getDuration } from './modules/player/playerRegistry';
 import LegacyBridge from './modules/core/LegacyBridge';
 
 const ControlPanel = () => {
 
   // Get store actions
-  const { isPlaying, setIsPlaying, triggerRestart, queue, addToQueue, removeFromQueue, reorderQueue, setCurrentSong, currentSong, queueMode, toggleQueueMode, invitedSongId, setInvitedSongId, setWaitingForGuest, waitCountdown, setWaitCountdown, setCountdownPaused, setMicAttemptHint } = useAppStore();
+  const { isPlaying, setIsPlaying, triggerRestart, queue, removeFromQueue, reorderQueue, setCurrentSong, currentSong, queueMode, toggleQueueMode, invitedSongId, setInvitedSongId, setWaitingForGuest, waitCountdown, setWaitCountdown, setCountdownPaused, setMicAttemptHint, addToHistory, loadHistory } = useAppStore();
 
   // Session restore logic (F5 vs fresh session)
-  // Pass reorderQueue to restore queue from session
   const { isRefresh, isRestoredSong, setIsRestoredSong } = useSessionRestore(setCurrentSong, setIsPlaying, reorderQueue);
 
   // Persist queue to session storage whenever it changes
   React.useEffect(() => {
-    import('./modules/core/useSessionRestore').then(({ saveQueueToSession }) => {
-      saveQueueToSession(queue);
-    });
+    saveQueueToSession(queue);
   }, [queue]);
+
+  // Load today's song history from localStorage on mount
+  React.useEffect(() => {
+    loadHistory();
+  }, []);
+
+  const logCurrentSongToHistory = () => {
+    const finishedSong = useAppStore.getState().currentSong;
+    if (finishedSong && finishedSong.videoId) {
+      addToHistory({
+        id: `${finishedSong.videoId}_${Date.now()}`,
+        videoId: finishedSong.videoId,
+        title: finishedSong.title,
+        cleanTitle: finishedSong.cleanTitle || '',
+        addedBy: finishedSong.addedBy || 'Khách',
+        customerId: finishedSong.customerId || '',
+        thumbnail: finishedSong.thumbnail || '',
+        completedAt: Date.now(),
+      });
+    }
+  };
 
   const handleNext = () => {
     if (queue.length > 0) {
@@ -50,8 +71,9 @@ const ControlPanel = () => {
   };
 
   const handleSongEnd = React.useCallback(() => {
+    logCurrentSongToHistory();
     handleNext();
-  }, [queue, removeFromQueue, setCurrentSong, setIsPlaying]);
+  }, [queue, removeFromQueue, setCurrentSong, setIsPlaying, addToHistory]);
 
   // Sync state to TV window & Firebase queue
   usePlayerSync('host', { onSongEnded: handleSongEnd });
@@ -116,16 +138,30 @@ const ControlPanel = () => {
     if (currentSong) {
       saveCurrentSongToSession(currentSong);
       setNowPlaying(currentSong).catch(() => { });
-      // SAFETY: Ensure it's removed from Firebase queue so it doesn't show as "Upcoming" on customer devices
-      // Only do this if the song has a firebaseKey (not a restored song which uses videoId as id)
+      // Song is now playing → complete it (remove from queue + advance startRound for fairness)
       if (currentSong.firebaseKey) {
-        removeFromFirebaseQueue(currentSong.firebaseKey).catch(() => { });
+        completeSong(currentSong.firebaseKey).catch(() => { });
       }
     } else {
       saveCurrentSongToSession(null);
       clearNowPlaying().catch(() => { });
     }
   }, [currentSong, isRefresh]);
+
+  // Sync playback progress to Firebase every 10s for customer-web
+  React.useEffect(() => {
+    if (!currentSong || !isPlaying) return;
+    const interval = setInterval(() => {
+      const time = getPlayerTime();
+      const dur = getDuration();
+      if (dur > 0) updateNowPlayingProgress(time, dur).catch(() => { });
+    }, 10000);
+    // Also send immediately when song starts playing
+    const t = getPlayerTime();
+    const d = getDuration();
+    if (d > 0) updateNowPlayingProgress(t, d).catch(() => { });
+    return () => clearInterval(interval);
+  }, [currentSong, isPlaying]);
 
   const handlePlayPause = () => {
     // If the current song is staged (waiting for manual start after a delete),
@@ -166,8 +202,24 @@ const ControlPanel = () => {
       songName = cleanYoutubeTitle(song.title);
     }
 
-    const msg = `Xin mời ${singer} lên sân khấu, trình bày ca khúc ${songName}`;
-    await announce(msg);
+    // Random gentle templates
+    const templates = [
+      `Xin mời ${singer} lên sân khấu, trình bày ca khúc ${songName}`,
+      `${singer} ơi? Mời ${singer} lên sân khấu trình bày bài hát ${songName} của mình`,
+      `Tiếp theo chương trình, xin mời ${singer} gửi tặng mọi người ca khúc ${songName}`,
+      `Một tràng pháo tay cho ${singer} với ca khúc ${songName}`,
+      `Xin mời giọng ca ${singer} chuẩn bị cho bài hát ${songName}`,
+      `Mời quý vị cùng thưởng thức giọng ca của ${singer} qua nhạc phẩm ${songName}`,
+      `Sân khấu xin được nhường lại cho ${singer} với bài hát ${songName}`,
+      `Để thay đổi không khí, mời ${singer} gửi đến mọi người ca khúc ${songName}`,
+      `Và sau đây, giọng ca ${singer} sẽ trình bày bài hát ${songName}`,
+      `Xin mời ${singer} cầm mic và cháy hết mình với ${songName}`,
+      `Tiếp nối chương trình văn nghệ, mời ${singer} lên sân khấu với bài ${songName}`
+    ];
+
+    const randomTemplate = templates[Math.floor(Math.random() * templates.length)];
+
+    await announce(randomTemplate);
   }, [announce]);
 
   // Watch invitedSongId for manual mode TTS-only announcement
@@ -196,6 +248,11 @@ const ControlPanel = () => {
   React.useEffect(() => {
     if (!currentSong) return;
     if (currentSong.isStaged) return; // Skip if staged (waiting for manual start)
+    // Skip TTS entirely for replaced songs — they play instantly
+    if (currentSong.isReplaced) {
+      setAnnouncedSongId(currentSong.id);
+      return;
+    }
     if (currentSong.id === announcedSongId) return;
 
     // Skip TTS announcement for restored songs on F5 refresh
@@ -353,6 +410,7 @@ const ControlPanel = () => {
           <div className="p-3 border-b border-slate-100 flex items-center justify-between bg-slate-50">
             <h2 className="text-lg font-black text-slate-800 uppercase tracking-tighter">HÀNG CHỜ</h2>
             <div className="flex items-center gap-2">
+              <HistoryButton />
               <button
                 onClick={toggleQueueMode}
                 className={`relative inline-flex h-6 w-12 items-center rounded-full transition-colors cursor-pointer ${queueMode === 'auto' ? 'bg-indigo-500' : 'bg-slate-300'}`}
@@ -413,7 +471,7 @@ const ControlPanel = () => {
 
             {/* Next */}
             <button
-              onClick={handleNext}
+              onClick={() => { logCurrentSongToHistory(); handleNext(); }}
               disabled={queue.length === 0}
               className="flex-1 py-4 px-6 rounded-xl flex items-center justify-center gap-3 bg-slate-800 text-white transition-all active:scale-95 shadow-lg shadow-slate-400/50 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-900"
             >
@@ -462,6 +520,8 @@ const ControlPanel = () => {
           </div>
         </Card>
       </div>
+
+      <HistoryModal />
     </div>
   );
 };

@@ -1,7 +1,7 @@
 import { ref, push, remove, onValue, set, get, update } from 'firebase/database';
 import { database, firebaseReady } from './firebaseConfig';
 import { getDeviceId } from '../utils/identity';
-import { generatePlayQueue } from './queueLogic';
+import { generatePlayQueue, globalNextRound } from './queueLogic';
 
 // --- REF & UTILS ---
 
@@ -41,86 +41,83 @@ async function syncPlayQueue() {
 
 // --- ACTIONS ---
 
-export async function pushToFirebaseQueue(song) {
+/**
+ * Convert guest name to a safe Firebase customer key.
+ * Each unique guest name gets their own round-robin slot.
+ */
+export function guestNameToCustomerKey(name) {
+    const safe = (name || '').trim().toLowerCase()
+        .replace(/[.#$\[\]\/]/g, '')
+        .replace(/\s+/g, '_');
+    return `guest_${safe || 'unknown'}`;
+}
+
+export async function pushToFirebaseQueue(song, customerKey) {
     if (!firebaseReady || !database) return Promise.resolve();
 
-    // 1. Identify User
-    const deviceId = getDeviceId();
-    const customerRef = ref(database, `customerQueues/${deviceId}`);
-
-    // 2. Get current state of this customer
+    const effectiveKey = customerKey || getDeviceId();
+    const customerRef = ref(database, `customerQueues/${effectiveKey}`);
     const snapshot = await get(customerRef);
-    let customerData = snapshot.val();
-
+    const customerData = snapshot.val();
     const now = Date.now();
 
+    // Read all customerQueues to compute fair startRound
+    const allSnapshot = await get(getCustomerQueuesRef());
+    const allQueues = allSnapshot.val() || {};
+    const nextRound = globalNextRound(allQueues);
+
     if (!customerData) {
-        // New customer
-        customerData = {
+        // Brand new customer → join at current active round
+        await update(customerRef, {
             name: song.addedBy || 'Khách mới',
             firstOrderTime: now,
-            songs: {} // Use map for easy deletion by ID, or array? Array is easier for logic. Let's use Object with push keys.
-        };
+            startRound: nextRound,
+        });
+    } else {
+        // Existing customer — check if they have any remaining normal songs
+        const songs = customerData.songs ? Object.values(customerData.songs) : [];
+        const hasNormalSongs = songs.some(s => !s.isPriority);
+
+        if (!hasNormalSongs) {
+            // All previous songs played → returning customer, bump startRound
+            const bumped = Math.max(customerData.startRound || 1, nextRound);
+            await update(customerRef, { startRound: bumped, name: song.addedBy });
+        } else {
+            await update(customerRef, { name: song.addedBy });
+        }
     }
 
-    // 3. Prepare new song entry
-    // We use push() to generate a key, but we need to store it inside the object
-    // Actually, let's just use an array in memory and save it back, or use firebase push
-    // `songs` as a sub-collection (node)
-
-    // Let's use a sub-node 'songs'
-    const songsRef = ref(database, `customerQueues/${deviceId}/songs`);
+    // Add song
+    const songsRef = ref(database, `customerQueues/${effectiveKey}/songs`);
     const newSongRef = push(songsRef);
     const newSongKey = newSongRef.key;
 
-    const newSongData = {
+    await set(newSongRef, {
         id: newSongKey,
         videoId: song.videoId,
         title: song.title,
         cleanTitle: song.cleanTitle || song.title,
         artist: song.artist || '',
-        addedBy: song.addedBy, // Store the name used at that time
+        addedBy: song.addedBy,
         thumbnail: song.thumbnail || '',
         addedAt: now,
         isPriority: song.isPriority || false,
         source: song.source || 'web',
-    };
+    });
 
-    // 4. Update Firebase: Add song AND update customer metadata if needed
-    // We do sequential updates to ensure consistency is acceptable
-    await set(newSongRef, newSongData);
-
-    if (!customerData.firstOrderTime) {
-        await update(customerRef, {
-            firstOrderTime: now,
-            name: song.addedBy
-        });
-    } else {
-        // Always update name to latest used
-        await update(customerRef, { name: song.addedBy });
-    }
-
-    // 5. Trigger Re-generation of Play Queue
-    // We wait for the add to finish, then sync.
     await syncPlayQueue();
-
     return { key: newSongKey };
 }
 
+// Track in-flight removals to prevent duplicate calls
+const _pendingRemovals = new Set();
+
 export async function removeFromFirebaseQueue(songId) {
-    // This is tricky: we receive a songId (firebaseKey) but don't know WHICH customer it belongs to easily
-    // unless the ID contains the customerId, or we search.
-    // However, our generatePlayQueue puts `customerId` in the item.
-    // The UI should pass the full item or we need to find it.
+    if (!firebaseReady || !database || !songId) return;
 
-    // If we only get an ID, we might need to search all customers?
-    // Let's assume the UI passes the ID that matches a key in `customerQueues/{cid}/songs/{songId}`
-    // WAIT: generated IDs are unique per push.
-
-    // Strategy: Search in customerQueues
-    // This is inefficient but functional for small karaoke scale (<50 customers).
-
-    if (!firebaseReady || !database) return;
+    // Dedup: skip if already being removed
+    if (_pendingRemovals.has(songId)) return;
+    _pendingRemovals.add(songId);
 
     try {
         const snapshot = await get(getCustomerQueuesRef());
@@ -129,7 +126,6 @@ export async function removeFromFirebaseQueue(songId) {
 
         let foundPath = null;
 
-        // Find who owns this song
         for (const [custId, data] of Object.entries(customers)) {
             if (data.songs && data.songs[songId]) {
                 foundPath = `customerQueues/${custId}/songs/${songId}`;
@@ -140,11 +136,53 @@ export async function removeFromFirebaseQueue(songId) {
         if (foundPath) {
             await remove(ref(database, foundPath));
             await syncPlayQueue();
-        } else {
-            console.warn("Song not found to remove:", songId);
         }
     } catch (e) {
         console.error("Error removing song:", e);
+    } finally {
+        _pendingRemovals.delete(songId);
+    }
+}
+
+/**
+ * Called when a song finishes playing or is skipped-at-turn.
+ * Removes the song AND advances the customer's startRound if it's a normal song.
+ * This ensures fairness: the customer's next song moves to the next round.
+ */
+export async function completeSong(songId) {
+    if (!firebaseReady || !database || !songId) return;
+
+    if (_pendingRemovals.has(songId)) return;
+    _pendingRemovals.add(songId);
+
+    try {
+        const snapshot = await get(getCustomerQueuesRef());
+        const customers = snapshot.val();
+        if (!customers) return;
+
+        for (const [custId, data] of Object.entries(customers)) {
+            if (data.songs && data.songs[songId]) {
+                const song = data.songs[songId];
+
+                // Remove the song
+                await remove(ref(database, `customerQueues/${custId}/songs/${songId}`));
+
+                // Advance startRound if it was a normal (non-priority) song
+                if (!song.isPriority) {
+                    const currentStart = data.startRound || 1;
+                    await update(ref(database, `customerQueues/${custId}`), {
+                        startRound: currentStart + 1,
+                    });
+                }
+
+                await syncPlayQueue();
+                return;
+            }
+        }
+    } catch (e) {
+        console.error("Error completing song:", e);
+    } finally {
+        _pendingRemovals.delete(songId);
     }
 }
 
@@ -177,6 +215,12 @@ export function setNowPlaying(song) {
     });
 }
 
+export function updateNowPlayingProgress(currentTime, duration) {
+    if (!firebaseReady || !database) return Promise.resolve();
+    const npRef = ref(database, 'nowPlaying');
+    return update(npRef, { currentTime, duration, updatedAt: Date.now() });
+}
+
 export function clearNowPlaying() {
     if (!firebaseReady || !database) return Promise.resolve();
     const npRef = ref(database, 'nowPlaying');
@@ -206,9 +250,9 @@ export function listenToFirebaseQueue(callback) {
 
     return onValue(qRef, (snapshot) => {
         const val = snapshot.val();
-        const list = val ? Object.values(val) : [];
-        // Note: generatePlayQueue returns an Array. Firebase stores array as array (index keys).
-        // callback expects the new playQueue format.
+        const list = val
+            ? (Array.isArray(val) ? val : Object.values(val)).filter(Boolean)
+            : [];
         callback(list);
     });
 }

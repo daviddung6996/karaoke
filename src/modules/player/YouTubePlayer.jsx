@@ -10,7 +10,7 @@ const YT_HIDE_STYLE = (
     `}</style>
 );
 
-const YouTubePlayer = ({ className, onReady, onStateChange, onEnded, muted = false, controls = true, quality = null, autoUnmute = false, passive = false }) => {
+const YouTubePlayer = React.memo(({ className, onReady, onStateChange, onEnded, muted = false, controls = true, quality = null, autoUnmute = false, passive = false }) => {
     const currentSong = useAppStore((s) => s.currentSong);
     const isPlaying = useAppStore((s) => s.isPlaying);
     const setIsPlaying = useAppStore((s) => s.setIsPlaying);
@@ -71,7 +71,7 @@ const YouTubePlayer = ({ className, onReady, onStateChange, onEnded, muted = fal
 
         // Periodic enforcement (every 5s) to fight YouTube auto-quality
         if (window.ytQualityInterval) clearInterval(window.ytQualityInterval);
-        window.ytQualityInterval = setInterval(enforceQuality, 15000);
+        window.ytQualityInterval = setInterval(enforceQuality, 30000);
 
         justLoadedRef.current = true;
         setTimeout(() => { justLoadedRef.current = false; }, 1500);
@@ -207,6 +207,6 @@ const YouTubePlayer = ({ className, onReady, onStateChange, onEnded, muted = fal
             />
         </div>
     );
-};
+});
 
 export default YouTubePlayer;

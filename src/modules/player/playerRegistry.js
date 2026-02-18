@@ -75,9 +75,7 @@ export const seekPlayer = (time) => {
         const iframe = _player.getIframe?.();
         if (!iframe || !iframe.src) return;
         _player.seekTo(time, true);
-    } catch (err) {
-        console.warn('[playerRegistry] seekPlayer skipped:', err.message);
-    }
+    } catch { }
 };
 
 export const getVolume = () => {
@@ -99,9 +97,7 @@ export const setVolume = (vol, allowUnmute = true) => {
         if (v > 0 && allowUnmute) {
             _player.unMute();
         }
-    } catch (err) {
-        console.warn('[playerRegistry] setVolume skipped:', err.message);
-    }
+    } catch { }
 };
 
 export const mutePlayer = () => {
@@ -157,15 +153,11 @@ const _iframeSafe = () => {
 export const playPlayer = () => {
     try {
         if (_iframeSafe()) _player.playVideo();
-    } catch (err) {
-        console.warn('[playerRegistry] playPlayer skipped:', err.message);
-    }
+    } catch { }
 };
 
 export const pausePlayer = () => {
     try {
         if (_iframeSafe()) _player.pauseVideo();
-    } catch (err) {
-        console.warn('[playerRegistry] pausePlayer skipped:', err.message);
-    }
+    } catch { }
 };

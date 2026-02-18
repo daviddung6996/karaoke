@@ -1,114 +1,117 @@
 
 /**
- * Generates what the "Play Queue" should look like based on current Customer Queues.
- * Implements a Round-Robin algorithm:
- * 1. Sort customers by firstOrderTime (who came first).
- * 2. Pick 1 song from each customer in order (Round 1).
- * 3. Pick next song from each customer (Round 2), and so on.
+ * Fair Round-Robin Queue Generator for Karaoke
  * 
- * @param {Object} customerQueues - Map of customerId -> { name, firstOrderTime, songs: { songId: SongData } }
- * @param {Array} playedSongs - List of song IDs (or unique keys) that have already been played/skipped in the current session.
- *                              This helps prevent re-generating songs that were already processed.
- *                              (Optional: for now we might just regenerate everything and filter, or keep index).
+ * FAIRNESS CONTRACT:
+ * 1. Each customer's i-th normal song plays at round = startRound + i
+ * 2. New customers join at the current active round (not round 1)
+ * 3. Returning customers (all songs played, adding more) rejoin at current round
+ * 4. Within the same round, customers are ordered by firstOrderTime (who came first)
+ * 5. Priority songs always go before all normal songs (FIFO among priorities)
  * 
- * Strategy for "played":
- * actually, the playQueue in Firebase should probably just be the *future* list?
- * Or should it be the full list including history?
+ * DATA MODEL (per customer in Firebase):
+ *   { name, firstOrderTime, startRound, songs: { id: SongData } }
  * 
- * To catch up with the prompt: "Giữ nguyên các bài đã hát (index < currentIndex). Chỉ re-generate phần chưa hát"
- * But since we don't have persistent backend state other than Firebase,
- * simpler approach:
- * - Generate the FULL target list from scratch every time.
- * - But wait, if we re-generate, the IDs might change? 
- * - We need stable IDs for songs in customerQueues.
- * 
- * @returns {Array} playQueueItems - [{ customerId, song, round, ... }]
+ * startRound = the absolute round number for this customer's FIRST remaining normal song
+ */
+
+/**
+ * Compute the current active round from customerQueues (NOT from playQueue).
+ * This is the earliest round that any customer is still waiting on.
+ * Returns 1 if no customers have normal songs.
+ */
+export function globalNextRound(customerQueues) {
+    const rounds = [];
+
+    for (const data of Object.values(customerQueues || {})) {
+        const songs = parseSongs(data.songs);
+        const normalSongs = songs.filter(s => !s.isPriority);
+        if (normalSongs.length > 0) {
+            rounds.push(data.startRound || 1);
+        }
+    }
+
+    return rounds.length > 0 ? Math.min(...rounds) : 1;
+}
+
+/**
+ * Generate the play queue from customerQueues.
+ * @param {Object} customerQueues - Firebase customerQueues snapshot
+ * @returns {Array} Ordered play queue items
  */
 export function generatePlayQueue(customerQueues) {
-    // 1. Separate Priority Songs vs Normal Songs
+    if (!customerQueues || Object.keys(customerQueues).length === 0) return [];
+
     const prioritySongs = [];
-    const normalCustomerQueues = {};
+    const customers = [];
 
-    // Clone and partition
-    Object.entries(customerQueues).forEach(([id, data]) => {
-        let songs = [];
-        if (data.songs) {
-            if (Array.isArray(data.songs)) {
-                songs = [...data.songs];
-            } else {
-                songs = Object.values(data.songs);
-            }
-        }
-
+    // Partition priority vs normal, per customer
+    for (const [id, data] of Object.entries(customerQueues)) {
+        const songs = parseSongs(data.songs);
         const pSongs = songs.filter(s => s.isPriority);
-        const nSongs = songs.filter(s => !s.isPriority);
+        const nSongs = songs.filter(s => !s.isPriority)
+            .sort((a, b) => (a.addedAt || 0) - (b.addedAt || 0));
 
-        if (pSongs.length > 0) {
-            pSongs.forEach(s => {
-                prioritySongs.push({
-                    ...s,
-                    customerId: id,
-                    customerName: data.name,
-                    isPriority: true,
-                    // valid firebaseKey
-                    firebaseKey: s.id || s.firebaseKey
-                });
+        for (const s of pSongs) {
+            prioritySongs.push({
+                ...s,
+                customerId: id,
+                customerName: data.name,
+                isPriority: true,
+                firebaseKey: s.id || s.firebaseKey,
             });
         }
 
         if (nSongs.length > 0) {
-            normalCustomerQueues[id] = {
-                ...data,
-                songs: nSongs.sort((a, b) => (a.addedAt || 0) - (b.addedAt || 0))
-            };
+            customers.push({
+                id,
+                name: data.name,
+                firstOrderTime: data.firstOrderTime || 0,
+                startRound: data.startRound || 1,
+                songs: nSongs,
+            });
         }
-    });
+    }
 
-    // 2. Sort Priority Songs (LIFO or FIFO? implementation plan said LIFO for priority previously?)
-    // "Most recently prioritized song always appears at the very top" -> LIFO?
-    // Let's stick to: Higher priorityOrder = Top. If same, later added = Top?
-    // Let's use addedAt ASC for fairness among priority?
-    // Actually, usually Priority = Insert at index 1.
-    // Let's sort by addedAt (FIFO) for now, unless priorityOrder is present.
+    // Priority songs: FIFO — người ưu tiên trước hát trước
     prioritySongs.sort((a, b) => (a.addedAt || 0) - (b.addedAt || 0));
 
-    // 3. Generate Round Robin for Normal Songs
+    // Sort customers by arrival order (who came to the session first)
+    customers.sort((a, b) => a.firstOrderTime - b.firstOrderTime);
+
+    // Round-Robin with startRound offset
+    if (customers.length === 0) return prioritySongs;
+
+    const minRound = Math.min(...customers.map(c => c.startRound));
+    const maxRound = Math.max(
+        ...customers.map(c => c.startRound + c.songs.length - 1)
+    );
+
     const rrQueue = [];
 
-    // Sort customers by arrival
-    const customers = Object.entries(normalCustomerQueues).map(([id, data]) => ({
-        id,
-        ...data
-    }));
-    customers.sort((a, b) => (a.firstOrderTime || 0) - (b.firstOrderTime || 0));
-
-    let round = 1;
-    let hasSongs = true;
-    const customerIndices = {};
-    customers.forEach(c => customerIndices[c.id] = 0);
-
-    while (hasSongs) {
-        hasSongs = false;
+    for (let round = minRound; round <= maxRound; round++) {
         for (const customer of customers) {
-            const songs = customer.songs || [];
-            const index = customerIndices[customer.id];
-            if (index < songs.length) {
-                const song = songs[index];
+            const songIndex = round - customer.startRound;
+            if (songIndex >= 0 && songIndex < customer.songs.length) {
+                const song = customer.songs[songIndex];
                 rrQueue.push({
                     ...song,
                     customerId: customer.id,
                     customerName: customer.name,
-                    round: round,
-                    originalSongIndex: index,
-                    firebaseKey: song.id || song.firebaseKey || `${customer.id}_${index}`
+                    round,
+                    originalSongIndex: songIndex,
+                    firebaseKey: song.id || song.firebaseKey || `${customer.id}_${songIndex}`,
                 });
-                customerIndices[customer.id]++;
-                hasSongs = true;
             }
         }
-        if (hasSongs) round++;
     }
 
-    // 4. Merge: Priority First, then Round Robin
     return [...prioritySongs, ...rrQueue];
+}
+
+/** Normalize Firebase songs (object or array) into a plain array */
+function parseSongs(songs) {
+    if (!songs) return [];
+    if (Array.isArray(songs)) return [...songs];
+    return Object.values(songs);
 }

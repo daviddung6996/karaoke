@@ -5,7 +5,10 @@
       "Bash(npx vite build)",
       "Bash(grep:*)",
       "Bash(npm run lint:*)",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "Bash(wc:*)",
+      "Bash(find:*)",
+      "Bash(npx vite build:*)"
     ]
   }
 }

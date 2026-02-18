@@ -3,19 +3,6 @@ import { useAppStore } from '../core/store';
 import { getPlayerTime, getDuration } from './playerRegistry';
 import { Volume2, VolumeX, Volume1 } from 'lucide-react';
 
-const CHANNEL_NAME = 'karaoke_sync_channel';
-
-let _tvChannel = null;
-const getTVChannel = () => {
-    if (!_tvChannel) _tvChannel = new BroadcastChannel(CHANNEL_NAME);
-    return _tvChannel;
-};
-const sendToTV = (type, payload) => {
-    try {
-        getTVChannel().postMessage({ type, payload });
-    } catch { _tvChannel = null; }
-};
-
 const formatTime = (seconds) => {
     if (!seconds || isNaN(seconds)) return '0:00';
     const m = Math.floor(seconds / 60);
@@ -97,7 +84,7 @@ const PlayerControls = () => {
             <div className="space-y-1">
                 <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
                     <div
-                        className="h-full bg-indigo-500 rounded-full transition-all duration-100"
+                        className="h-full bg-indigo-500 rounded-full"
                         style={{ width: `${progress}%` }}
                     />
                 </div>

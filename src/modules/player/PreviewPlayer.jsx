@@ -1,8 +1,8 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useMemo } from 'react';
 import { Mic } from 'lucide-react';
 import { useAppStore } from '../core/store';
 
-const PreviewPlayer = ({ className }) => {
+const PreviewPlayer = React.memo(({ className }) => {
     const currentSong = useAppStore(s => s.currentSong);
     const isPlaying = useAppStore(s => s.isPlaying);
     const diskRef = useRef(null);
@@ -13,9 +13,12 @@ const PreviewPlayer = ({ className }) => {
         diskRef.current.style.animationPlayState = isPlaying ? 'running' : 'paused';
     }, [isPlaying]);
 
-    if (!currentSong) return <div className="bg-black text-white flex items-center justify-center h-full w-full">Chưa phát bài nào</div>;
+    const thumbnailUrl = useMemo(
+        () => currentSong ? `https://img.youtube.com/vi/${currentSong.videoId}/hqdefault.jpg` : null,
+        [currentSong?.videoId]
+    );
 
-    const thumbnailUrl = `https://img.youtube.com/vi/${currentSong.videoId}/hqdefault.jpg`;
+    if (!currentSong) return <div className="bg-black text-white flex items-center justify-center h-full w-full">Chưa phát bài nào</div>;
 
     return (
         <div
@@ -71,6 +74,6 @@ const PreviewPlayer = ({ className }) => {
             </div>
         </div>
     );
-};
+});
 
 export default PreviewPlayer;

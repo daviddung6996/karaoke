@@ -17,7 +17,7 @@ export const useTVWindow = () => {
 
     // Poll to detect if TV window was closed
     useEffect(() => {
-        const interval = setInterval(checkWindow, 1000);
+        const interval = setInterval(checkWindow, 3000);
         return () => clearInterval(interval);
     }, [checkWindow]);
 
@@ -28,27 +28,33 @@ export const useTVWindow = () => {
             return;
         }
 
-        let features = 'width=1280,height=720,menubar=no,toolbar=no,location=no,status=no';
+        let left = 0;
+        let top = 0;
+        let width = window.screen.width;
+        let height = window.screen.height;
         let targetScreen = null;
 
         // Try Window Management API to find a secondary screen
         if ('getScreenDetails' in window) {
             try {
                 const screenDetails = await window.getScreenDetails();
-                const currentScreen = screenDetails.currentScreen;
                 // Find any screen that is NOT the current one (the TV)
-                targetScreen = screenDetails.screens.find(s => s !== currentScreen);
+                targetScreen = screenDetails.screens.find(s => s !== screenDetails.currentScreen);
 
                 if (targetScreen) {
-                    // Use full width/height (not availWidth) to cover taskbar if possible
-                    features = `popup,left=${targetScreen.left},top=${targetScreen.top},width=${targetScreen.width},height=${targetScreen.height}`;
+                    left = targetScreen.left;
+                    top = targetScreen.top;
+                    width = targetScreen.width;
+                    height = targetScreen.height;
                 }
-            } catch (e) {
-                console.warn('Window Management API not available or denied:', e);
+            } catch {
+                // Window Management API denied
             }
         }
 
-        // Open in a new window
+        // Add fullscreen=yes hint for some browsers
+        const features = `popup,left=${left},top=${top},width=${width},height=${height},fullscreen=yes`;
+
         const tvWindow = window.open(
             '/projection',
             'karaoke_tv',
@@ -59,39 +65,9 @@ export const useTVWindow = () => {
             tvWindowRef.current = tvWindow;
             setIsTVOpen(true);
 
-            // Only fullscreen + reposition if we found a SECONDARY screen
+            // Store target screen for manual toggle
             if (targetScreen) {
-                const tryFullscreen = () => {
-                    // Strategy 1: requestFullscreen with { screen } option (Window Management API)
-                    try {
-                        // This API allows fullscreen on a SPECIFIC screen
-                        tvWindow.document.documentElement.requestFullscreen({ screen: targetScreen })
-                            .catch(() => {
-                                forcePosition();
-                            });
-                    } catch {
-                        forcePosition();
-                    }
-
-                    // Strategy 2 (fallback): Position + oversize to cover window chrome
-                    function forcePosition() {
-                        // Offset negative to hide title bar, oversize to cover decorations
-                        tvWindow.moveTo(targetScreen.left, targetScreen.top - 30);
-                        tvWindow.resizeTo(targetScreen.width, targetScreen.height + 60);
-
-                        // Re-apply after a tick (some browsers defer moveTo)
-                        setTimeout(() => {
-                            tvWindow.moveTo(targetScreen.left, targetScreen.top - 30);
-                            tvWindow.resizeTo(targetScreen.width, targetScreen.height + 60);
-                        }, 500);
-                    }
-                };
-
-                if (tvWindow.document.readyState === 'complete') {
-                    tryFullscreen();
-                } else {
-                    tvWindow.addEventListener('load', tryFullscreen);
-                }
+                tvWindow.__targetScreen = targetScreen;
             }
         }
     }, []);
@@ -103,6 +79,8 @@ export const useTVWindow = () => {
         tvWindowRef.current = null;
         setIsTVOpen(false);
     }, []);
+
+
 
     return { isTVOpen, openTV, closeTV };
 };

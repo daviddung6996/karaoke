@@ -3,34 +3,6 @@ import { createPortal } from 'react-dom';
 import { Mic, Pause, Play } from 'lucide-react';
 import { useAppStore } from '../core/store';
 
-const HINTS = {
-    weak: { text: '🎤 Hãy gõ mạnh hơn vào mic!', color: 'amber' },
-    medium: { text: '🔊 Gần rồi! Nói to hơn nữa!', color: 'green' },
-};
-
-const FloatingOrb = ({ delay, size, x }) => (
-    <div
-        className="inv-orb"
-        style={{
-            width: size,
-            height: size,
-            left: `${x}%`,
-            animationDelay: `${delay}s`,
-        }}
-    />
-);
-
-const SoundwaveRing = ({ delay, size }) => (
-    <div
-        className="inv-ring"
-        style={{
-            width: size,
-            height: size,
-            animationDelay: `${delay}s`,
-        }}
-    />
-);
-
 const WaitingOverlay = ({ countdown: propCountdown, onSkip, onPauseToggle }) => {
     const waitingForGuest = useAppStore((s) => s.waitingForGuest);
     const currentSong = useAppStore((s) => s.currentSong);
@@ -55,14 +27,8 @@ const WaitingOverlay = ({ countdown: propCountdown, onSkip, onPauseToggle }) => 
     const singer = currentSong?.addedBy || 'Khách';
     const songTitle = currentSong?.cleanTitle || currentSong?.title || '';
 
-    // SVG circular countdown
-    const radius = 54;
-    const circumference = 2 * Math.PI * radius;
     const maxSeconds = 30;
     const progress = Math.max(0, (countdown ?? maxSeconds) / maxSeconds);
-    const strokeOffset = circumference * (1 - progress);
-
-    const hint = micAttemptHint ? HINTS[micAttemptHint] : null;
 
     return (
         <>
@@ -73,8 +39,6 @@ const WaitingOverlay = ({ countdown: propCountdown, onSkip, onPauseToggle }) => 
                     <div className="inv-orbs">
                         <div className="inv-orb" style={{ left: '20%', width: '300px', height: '300px', animationDelay: '0s' }} />
                         <div className="inv-orb" style={{ left: '70%', width: '400px', height: '400px', animationDelay: '-5s' }} />
-                        <div className="inv-orb" style={{ left: '40%', width: '200px', height: '200px', animationDelay: '-10s' }} />
-
                     </div>
 
                     {/* Main Content (Centered & Expanded) */}
@@ -83,8 +47,6 @@ const WaitingOverlay = ({ countdown: propCountdown, onSkip, onPauseToggle }) => 
                         <div className="inv-mic-wrap" onClick={onSkip}>
                             <div className="inv-rings">
                                 <div className="inv-ring" style={{ animationDelay: '0s' }} />
-                                <div className="inv-ring" style={{ animationDelay: '1s' }} />
-
                             </div>
                             <svg className="inv-countdown-svg" viewBox="0 0 100 100">
                                 <circle cx="50" cy="50" r="48" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="3" />

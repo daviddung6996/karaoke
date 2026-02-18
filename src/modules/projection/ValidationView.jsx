@@ -6,7 +6,7 @@ import MarqueeOverlay from './MarqueeOverlay';
 import { usePlayerSync } from '../player/usePlayerSync';
 import { Maximize, Minimize } from 'lucide-react';
 
-import bgVideo from '../../assets/bg.mp4';
+const BG_VIDEO_PATH = '/bg.mp4';
 
 class PlayerErrorBoundary extends React.Component {
     constructor(props) {
@@ -18,8 +18,8 @@ class PlayerErrorBoundary extends React.Component {
         return { hasError: true };
     }
 
-    componentDidCatch(error) {
-        console.warn('[TV] Player crashed, recovering...', error.message);
+    componentDidCatch() {
+        // Auto-recover from crash
         setTimeout(() => this.setState({ hasError: false }), 500);
     }
 
@@ -65,8 +65,8 @@ const Watchdog = React.memo(() => {
 
             if (state === 1) {
                 unmutePlayer();
-            } else if (state === -1 || state === 5 || state === 2) {
-                // Stuck or paused unexpectedly — kickstart with mute trick
+            } else if (state === -1 || state === 5) {
+                // Stuck — kickstart with mute trick (skip state 2 = user pause)
                 mutePlayer();
                 playPlayer();
                 setTimeout(() => unmutePlayer(), 500);
@@ -164,11 +164,7 @@ const ValidationView = () => {
         // Initial check
         setTimeout(trySmartFullscreen, 1000);
 
-        // Re-check on song change (safety net)
-        if (currentSong?.videoId) {
-            setTimeout(trySmartFullscreen, 500);
-        }
-    }, [currentSong?.videoId]);
+    }, []);
 
     // Auto-hide controls after 3s, show on mouse move (throttled)
     const resetHideTimer = useCallback(() => {
@@ -193,8 +189,21 @@ const ValidationView = () => {
         };
     }, [resetHideTimer]);
 
+    const handleStart = useCallback(() => {
+        if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen().catch(() => { });
+        }
+        window.__unlocked = true;
+        if (window.opener) {
+            window.opener.postMessage({ type: 'tv-ready' }, '*');
+        }
+    }, []);
+
     return (
-        <div className="h-screen w-screen bg-black overflow-hidden flex items-center justify-center relative">
+        <div
+            className="h-screen w-screen bg-black overflow-hidden flex items-center justify-center relative cursor-pointer"
+            onClick={handleStart}
+        >
             {/* Watchdog: Force Playback if Stuck */}
             <Watchdog />
 
@@ -219,19 +228,17 @@ const ValidationView = () => {
                 ) : <div className="w-full h-full" />}
             </div>
 
-            {/* Background Video — only mounted when visible to save GPU */}
-            {(!currentSong || !isPlaying) && (
-                <div className="absolute inset-0 z-0 overflow-hidden">
-                    <video
-                        src={bgVideo}
-                        autoPlay
-                        loop
-                        muted
-                        playsInline
-                        className="w-full h-full object-cover"
-                    />
-                </div>
-            )}
+            {/* Background Video — always mounted, toggle with opacity to avoid re-mount jank */}
+            <div className={`absolute inset-0 z-0 overflow-hidden transition-opacity duration-300 ${currentSong && isPlaying ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+                <video
+                    src={BG_VIDEO_PATH}
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    className="w-full h-full object-cover"
+                />
+            </div>
             <WaitingOverlay />
 
             {/* Fullscreen toggle — auto-hide after 3s */}
