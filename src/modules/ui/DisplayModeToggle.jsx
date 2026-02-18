@@ -1,16 +1,12 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useAppStore } from '../core/store';
 
 const DisplayModeToggle = ({ openTV, closeTV, isTVOpen }) => {
     const [mode, setMode] = useState('duplicate');
     const [loading, setLoading] = useState(false);
 
-    useEffect(() => {
-        fetch('/api/display/status')
-            .then(r => r.json())
-            .then(data => { if (data.mode) setMode(data.mode); })
-            .catch(() => { });
-    }, []);
+    // No status fetch on mount — app defaults to 'duplicate' (YouTube mode)
+    // User manually switches to Karaoke when ready
 
     const switchTimerRef = useRef(null);
     const switchMode = useCallback(async (newMode) => {
@@ -20,6 +16,8 @@ const DisplayModeToggle = ({ openTV, closeTV, isTVOpen }) => {
             if (newMode === 'duplicate') {
                 if (isTVOpen) closeTV();
                 useAppStore.getState().setIsPlaying(false);
+                // Open YouTube tab
+                window.open('https://www.youtube.com', '_blank');
             }
             const res = await fetch(`/api/display/${newMode}`, { method: 'POST' });
             const data = await res.json();

@@ -5,13 +5,13 @@ export const useAppStore = create((set) => ({
     queue: [],
     addToQueue: (item) => set((state) => {
         if (!item || !item.videoId || !item.title) {
-                return state;
+            return state;
         }
         return { queue: [...state.queue, item] };
     }),
     insertToQueue: (item, index) => set((state) => {
         if (!item || !item.videoId || !item.title) {
-                return state;
+            return state;
         }
         const newQueue = [...state.queue];
         if (index < 0) index = 0;
@@ -71,6 +71,44 @@ export const useAppStore = create((set) => ({
     songHistory: [],
     showHistoryModal: false,
     setShowHistoryModal: (val) => set({ showHistoryModal: val }),
+
+    // Mic Settings
+    showMicSettingsModal: false,
+    setShowMicSettingsModal: (val) => set({ showMicSettingsModal: val }),
+    // Persisted settings (with defaults)
+    micSensitivity: Number(localStorage.getItem('karaoke_micSensitivity') || 6),
+    micDelay: Number(localStorage.getItem('karaoke_micDelay') || 0.8),
+    micMinVol: Number(localStorage.getItem('karaoke_micMinVol') || -100), // Visual gain floor
+
+    // Advanced Settings
+    micBassFilter: Number(localStorage.getItem('karaoke_micBassFilter') || 2), // MID_VS_LOW_DELTA_DB
+    micTransient: Number(localStorage.getItem('karaoke_micTransient') || 2.5), // SPIKE_RMS_MULTIPLIER
+    micAdaptation: Number(localStorage.getItem('karaoke_micAdaptation') || 0.02), // BASELINE_EMA_ALPHA
+
+    setMicSensitivity: (val) => {
+        localStorage.setItem('karaoke_micSensitivity', val);
+        set({ micSensitivity: val });
+    },
+    setMicDelay: (val) => {
+        localStorage.setItem('karaoke_micDelay', val);
+        set({ micDelay: val });
+    },
+    setMicMinVol: (val) => {
+        localStorage.setItem('karaoke_micMinVol', val);
+        set({ micMinVol: val });
+    },
+    setMicBassFilter: (val) => {
+        localStorage.setItem('karaoke_micBassFilter', val);
+        set({ micBassFilter: val });
+    },
+    setMicTransient: (val) => {
+        localStorage.setItem('karaoke_micTransient', val);
+        set({ micTransient: val });
+    },
+    setMicAdaptation: (val) => {
+        localStorage.setItem('karaoke_micAdaptation', val);
+        set({ micAdaptation: val });
+    },
 
     addToHistory: (entry) => set((state) => {
         if (!entry || !entry.videoId) return state;

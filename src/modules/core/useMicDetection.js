@@ -211,8 +211,24 @@ export const useMicDetection = () => {
                     const midVsLowDelta = midDelta - lowDelta; // Mid rose MORE than low? → voice signal
                     const rmsRatio = baselineRms > 0.0001 ? rms / baselineRms : 0;
 
+                    // ── Dynamic Settings from Store ──
+                    const {
+                        micSensitivity, micDelay,
+                        micBassFilter, micTransient, micAdaptation
+                    } = useAppStore.getState();
+
+                    // Map sensitivity (1-10) to Threshold dB
+                    // 1 (Hard) -> 11dB
+                    // 6 (Default) -> 6dB
+                    // 10 (Easy) -> 2dB
+                    const dynamicTriggerDb = Math.max(2, 12 - micSensitivity);
+
+                    // Map delay (seconds) to ms
+                    const dynamicSustainMs = micDelay * 1000;
+
+
                     // ── 1. RMS spike detection (mic tap, pop, switch-on) ──
-                    if (rmsRatio > SPIKE_RMS_MULTIPLIER) {
+                    if (rmsRatio > micTransient) {
                         spikeFrames++;
                         if (spikeFrames >= SPIKE_CONFIRM_FRAMES) {
                             done('mic');
@@ -225,13 +241,13 @@ export const useMicDetection = () => {
                     // ── 2. Sustained mid-band lift (voice through karaoke mic → amli → speakers) ──
                     // Condition: mid-band rose significantly AND mid rose more than bass
                     // This filters out: bass drops, general volume increase, crowd noise (broadband)
-                    const isVoiceLift = midDelta > MID_DELTA_TRIGGER_DB && midVsLowDelta > MID_VS_LOW_DELTA_DB;
+                    const isVoiceLift = midDelta > dynamicTriggerDb && midVsLowDelta > micBassFilter;
 
                     if (isVoiceLift) {
                         isCandidate = true;
                         if (!voiceAboveSince) {
                             voiceAboveSince = Date.now();
-                        } else if (Date.now() - voiceAboveSince >= SUSTAINED_MS) {
+                        } else if (Date.now() - voiceAboveSince >= dynamicSustainMs) {
                             done('mic');
                             return;
                         }
@@ -249,8 +265,8 @@ export const useMicDetection = () => {
                         const now = Date.now();
                         if (now - lastAttemptTime > 2000) {
                             // How close are we to triggering?
-                            const midStrength = MID_DELTA_TRIGGER_DB > 0 ? midDelta / MID_DELTA_TRIGGER_DB : 0;
-                            const spikeStrength = rmsRatio / SPIKE_RMS_MULTIPLIER;
+                            const midStrength = dynamicTriggerDb > 0 ? midDelta / dynamicTriggerDb : 0;
+                            const spikeStrength = rmsRatio / micTransient;
                             const strength = Math.max(midStrength, spikeStrength);
 
                             if (strength > 0.5 && strength < 1.0) {
@@ -265,9 +281,9 @@ export const useMicDetection = () => {
 
                     // ── 4. Update rolling baseline (only when NOT in candidate state) ──
                     if (!isCandidate || !BASELINE_FREEZE_ON_CANDIDATE) {
-                        baselineLow = baselineLow * (1 - BASELINE_EMA_ALPHA) + lowDb * BASELINE_EMA_ALPHA;
-                        baselineMid = baselineMid * (1 - BASELINE_EMA_ALPHA) + midDb * BASELINE_EMA_ALPHA;
-                        baselineRms = baselineRms * (1 - BASELINE_EMA_ALPHA) + rms * BASELINE_EMA_ALPHA;
+                        baselineLow = baselineLow * (1 - micAdaptation) + lowDb * micAdaptation;
+                        baselineMid = baselineMid * (1 - micAdaptation) + midDb * micAdaptation;
+                        baselineRms = baselineRms * (1 - micAdaptation) + rms * micAdaptation;
                     }
                 };
 

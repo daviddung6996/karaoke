@@ -13,6 +13,8 @@ import DisplayModeToggle from './modules/ui/DisplayModeToggle';
 
 import HistoryButton from './modules/queue/HistoryButton';
 import HistoryModal from './modules/queue/HistoryModal';
+import MicSettingsButton from './modules/ui/MicSettingsButton';
+import MicSettingsModal from './modules/ui/MicSettingsModal';
 import { Search, Play, Pause, SkipForward, RotateCcw, Square } from 'lucide-react';
 import { useAppStore } from './modules/core/store';
 import { useTTS } from './modules/core/useTTS';
@@ -23,7 +25,6 @@ import { useFirebaseSync } from './modules/core/useFirebaseSync';
 import { useSessionRestore, saveCurrentSongToSession, saveQueueToSession } from './modules/core/useSessionRestore';
 import { setNowPlaying, clearNowPlaying, completeSong, updateNowPlayingProgress } from './services/firebaseQueueService';
 import { getPlayerTime, getDuration } from './modules/player/playerRegistry';
-import LegacyBridge from './modules/core/LegacyBridge';
 
 const ControlPanel = () => {
 
@@ -435,7 +436,6 @@ const ControlPanel = () => {
 
   return (
     <div className="flex flex-col lg:flex-row h-screen font-sans p-2 gap-4 bg-slate-100">
-      <LegacyBridge />
       {/* Left Panel: Queue */}
       <div
         className={getPanelFlex('left')}
@@ -446,14 +446,17 @@ const ControlPanel = () => {
           <div className="p-3 border-b border-slate-100 flex items-center justify-between bg-slate-50">
             <h2 className="text-lg font-black text-slate-800 uppercase tracking-tighter">HÀNG CHỜ</h2>
             <div className="flex items-center gap-2">
+              <MicSettingsButton />
               <HistoryButton />
               <button
                 onClick={toggleQueueMode}
-                className={`relative inline-flex h-6 w-12 items-center rounded-full transition-colors cursor-pointer ${queueMode === 'auto' ? 'bg-indigo-500' : 'bg-slate-300'}`}
+                className={`inline-flex h-5 px-2 items-center rounded-full transition-colors cursor-pointer gap-1 flex-shrink-0 overflow-hidden ${queueMode === 'auto' ? 'bg-indigo-500' : 'bg-slate-400'}`}
               >
-                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform shadow-sm ${queueMode === 'auto' ? 'translate-x-7' : 'translate-x-1'}`} />
+                <span className="text-[10px] font-bold text-white pointer-events-none whitespace-nowrap leading-tight">
+                  {queueMode === 'auto' ? 'Tự động' : 'Thủ công'}
+                </span>
+                <span className={`inline-block h-2.5 w-2.5 rounded-full bg-white transition-transform shadow-sm flex-shrink-0 ${queueMode === 'auto' ? '' : 'order-first'}`} />
               </button>
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{queueMode === 'auto' ? 'Auto' : 'Thủ Công'}</span>
             </div>
           </div>
           <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
@@ -558,6 +561,7 @@ const ControlPanel = () => {
       </div>
 
       <HistoryModal />
+      <MicSettingsModal />
     </div>
   );
 };

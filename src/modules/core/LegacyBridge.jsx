@@ -29,21 +29,33 @@ const LegacyBridge = () => {
 
         // Force check existing items on mount to ensure we clear stale data
         get(legacyQueueRef).then(async (snapshot) => {
-            if (snapshot.exists()) {
-                const data = snapshot.val();
+            try {
+                if (snapshot.exists()) {
+                    const data = snapshot.val();
 
-                // Process each existing item
-                for (const [key, val] of Object.entries(data)) {
-                    await processLegacyItem(key, val);
+                    // Process each existing item
+                    for (const [key, val] of Object.entries(data)) {
+                        try {
+                            await processLegacyItem(key, val);
+                        } catch (err) {
+                            console.error('[LegacyBridge] Failed to process item:', key, err);
+                        }
+                    }
                 }
+            } catch (err) {
+                console.error('[LegacyBridge] Failed to check legacy queue:', err);
             }
         });
 
         const unsubscribe = onChildAdded(legacyQueueRef, async (snapshot) => {
-            const val = snapshot.val();
-            const key = snapshot.key;
-            if (val) {
-                await processLegacyItem(key, val);
+            try {
+                const val = snapshot.val();
+                const key = snapshot.key;
+                if (val) {
+                    await processLegacyItem(key, val);
+                }
+            } catch (err) {
+                console.error('[LegacyBridge] onChildAdded error:', err);
             }
         });
 
@@ -51,25 +63,33 @@ const LegacyBridge = () => {
     }, []);
 
     const processLegacyItem = async (key, val) => {
-        if (!val || typeof val !== 'object') {
-            console.warn('[LegacyBridge] Invalid item format (not an object), removing:', key);
-            await remove(ref(database, `queue/${key}`));
-            return;
-        }
-
-        // Validate required fields
-        if (!val.videoId || !val.title) {
-            console.warn('[LegacyBridge] Item missing required fields (videoId/title), removing:', key, val);
-            await remove(ref(database, `queue/${key}`));
-            return;
-        }
-
         try {
+            if (!val || typeof val !== 'object') {
+                console.warn('[LegacyBridge] Invalid item format (not an object), removing:', key);
+                try {
+                    await remove(ref(database, `queue/${key}`));
+                } catch (err) {
+                    console.warn('[LegacyBridge] Failed to remove invalid item:', key, err);
+                }
+                return;
+            }
+
+            // Validate required fields
+            if (!val.videoId || !val.title) {
+                console.warn('[LegacyBridge] Item missing required fields (videoId/title), removing:', key, val);
+                try {
+                    await remove(ref(database, `queue/${key}`));
+                } catch (err) {
+                    console.warn('[LegacyBridge] Failed to remove incomplete item:', key, err);
+                }
+                return;
+            }
+
             // 1. Migrate to new system
             // Ensure no undefined values are passed
             await pushToFirebaseQueue({
-                videoId: val.videoId || '',
-                title: val.title || 'Unknown Title',
+                videoId: val.videoId,
+                title: val.title,
                 cleanTitle: val.cleanTitle || '',
                 artist: val.artist || '',
                 // Fallback for addedBy if missing
@@ -80,13 +100,13 @@ const LegacyBridge = () => {
             });
 
             // 2. Remove from old queue immediately
-            await remove(ref(database, `queue/${key}`));
+            try {
+                await remove(ref(database, `queue/${key}`));
+            } catch (err) {
+                console.warn('[LegacyBridge] Failed to remove after migration:', key, err);
+            }
         } catch (err) {
-            console.error('[LegacyBridge] Failed to migrate:', err);
-            // If it fails due to Firebase issues, we might not want to remove it yet?
-            // But if it fails due to validation (like the error we saw), we should probably drop it?
-            // The error was "value argument contains undefined", which implies my manual fallback above didn't exist previously.
-            // With validation above, it should be safe.
+            console.error('[LegacyBridge] Error processing item:', key, err);
         }
     };
 
