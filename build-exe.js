@@ -46,9 +46,9 @@ fs.writeFileSync(path.join(OUT, 'package.json'), JSON.stringify(pkg, null, 2));
 console.log('📥 Step 3: Installing production dependencies...');
 execSync('npm install --omit=dev', { stdio: 'inherit', cwd: OUT });
 
-// Create improved start.bat with auto-install check
+// Create start.bat
 fs.writeFileSync(path.join(OUT, 'start.bat'),
-  `@echo off\r\ntitle Karaoke Server\r\necho.\r\necho   Checking components...\r\nif not exist node_modules (\r\n  echo   [!] Missing dependencies. Installing... (Internet required for first run)\r\n  npm install --omit=dev\r\n)\r\necho.\r\necho   Starting Karaoke Server...\r\necho   Browser will open at http://localhost:5173\r\necho.\r\ntimeout /t 2 /nobreak >nul\r\nstart http://localhost:5173\r\nnode server.js\r\npause\r\n`
+  `@echo off\r\ntitle Karaoke Server\r\necho.\r\necho   Starting Karaoke Server...\r\necho   Browser will open at http://localhost:5173\r\necho.\r\ntimeout /t 2 /nobreak >nul\r\nstart http://localhost:5173\r\nnode server.js\r\npause\r\n`
 );
 
 // Create start.sh for Linux/Mac
@@ -75,14 +75,11 @@ function copyDir(src, dest) {
 }
 
 function getFolderSize(dir) {
-  let bytes = 0;
-  function walk(d) {
-    for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
-      const p = path.join(d, entry.name);
-      if (entry.isDirectory()) walk(p);
-      else bytes += fs.statSync(p).size;
-    }
+  let size = 0;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, entry.name);
+    if (entry.isDirectory()) size += parseFloat(getFolderSize(p));
+    else size += fs.statSync(p).size;
   }
-  walk(dir);
-  return (bytes / 1024 / 1024).toFixed(1);
+  return (size / 1024 / 1024).toFixed(1);
 }
