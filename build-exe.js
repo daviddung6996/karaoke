@@ -27,9 +27,7 @@ if (fs.existsSync(nmOut)) fs.rmSync(nmOut, { recursive: true });
 // Copy fresh dist/
 copyDir(path.join(__dirname, 'dist'), distOut);
 
-// Copy latest server.js from root source
-console.log('📄 Copying latest server.js...');
-fs.copyFileSync(path.join(__dirname, 'server.js'), path.join(OUT, 'server.js'));
+// server.js is maintained directly in karaoke-portable/ — no copy needed
 
 // Create minimal package.json for the portable version
 const pkg = {
