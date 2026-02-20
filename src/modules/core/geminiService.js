@@ -230,7 +230,8 @@ Rules:
 2. If format is "Artist - Title" or "Artist | Title", extract Title correctly.
 3. Remove 'karaoke', 'remix', 'beat', 'cover', 'mv', 'official', 'lyrics', '[...]', '(...)' tags.
 4. Remove 'tone', 'hạ tone', 'nâng tone', 'dễ hát', 'tone nam', 'tone nữ', 'hạ beat', 'gốc'.
-5. Capitalize correctly.`;
+5. Remove clickbait/SEO phrases: 'hay nhất', 'dễ hát nhất', 'hit nhất', 'mới nhất', 'top trending', 'triệu view', 'cực hay', 'siêu hay', 'cực phẩm', 'hot nhất', 'buồn nhất', 'tuyệt đỉnh', etc. These are NOT part of the song title.
+6. Capitalize correctly.`;
 
 export const cleanSongTitle = async (rawTitle) => {
     if (!rawTitle) return null;

@@ -2,7 +2,7 @@ import React, { useState, useRef, useCallback } from 'react';
 import { useAppStore } from '../core/store';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
-import { Trash2, GripVertical, X, Play, ArrowUpToLine } from 'lucide-react';
+import { Trash2, GripVertical, X, Play, ArrowUpToLine, Disc3 } from 'lucide-react';
 import { removeFromFirebaseQueue, setNowPlaying } from '../../services/firebaseQueueService';
 
 // ─── Drag-to-Reorder via pure pointer events ───
@@ -28,7 +28,7 @@ function calcShift(index, dragIndex, overIndex, itemHeight) {
     return 0;
 }
 
-const QueueItem = React.memo(({ item, index, onRemove, onReplace, onPlay, onInvite, isFirst, hasCurrentSong, queueMode, invitedSongId, dragState, onDragStart, itemHeight }) => {
+const QueueItem = React.memo(({ item, index, onRemove, onReplace, onPlay, onInvite, onWaitForSong, onChooseForGuest, onSkipWaiting, isFirst, hasCurrentSong, queueMode, invitedSongId, dragState, onDragStart, itemHeight }) => {
     const isDragging = dragState?.dragIndex === index;
     const shift = dragState ? calcShift(index, dragState.dragIndex, dragState.overIndex, itemHeight) : 0;
 
@@ -42,7 +42,11 @@ const QueueItem = React.memo(({ item, index, onRemove, onReplace, onPlay, onInvi
                 zIndex: isDragging ? 0 : shift !== 0 ? 2 : 1,
             }}
         >
-            <Card className={`flex flex-col gap-2 p-2 border-0 shadow-sm relative group rounded-lg select-none`}>
+            <Card className={`flex flex-col gap-2 p-2 border-0 shadow-sm relative group rounded-lg select-none ${item.status === 'waiting' ? 'bg-amber-50 border border-amber-200' :
+                    item.status === 'skipped' ? 'opacity-50 bg-slate-50' :
+                        item.wasSkipped && item.status === 'ready' ? 'bg-green-50 border-2 border-green-300 animate-pulse' :
+                            ''
+                }`}>
                 <div className="flex items-start gap-3">
                     {/* Drag Handle */}
                     <div
@@ -54,7 +58,12 @@ const QueueItem = React.memo(({ item, index, onRemove, onReplace, onPlay, onInvi
 
                     {/* Song Info */}
                     <div className="flex-1 min-w-0">
-                        <h3 className="font-bold text-slate-800 text-sm leading-snug truncate uppercase tracking-tight" title={item.title}>{item.title || 'Không có tiêu đề'}</h3>
+                        <h3 className={`font-bold text-sm leading-snug truncate uppercase tracking-tight ${item.status === 'waiting' ? 'text-amber-700' :
+                                item.status === 'skipped' ? 'text-slate-400' :
+                                    'text-slate-800'
+                            }`} title={item.title || 'Chờ chọn bài'}>
+                            {item.status === 'waiting' ? `${item.addedBy} - ⏳ Chờ chọn bài` : (item.title || 'Không có tiêu đề')}
+                        </h3>
                         <div className="flex items-center gap-2 mt-1 flex-wrap">
                             <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 uppercase tracking-wider">{item.addedBy}</span>
                             {item.isPriority && (
@@ -65,6 +74,21 @@ const QueueItem = React.memo(({ item, index, onRemove, onReplace, onPlay, onInvi
                             {item.round && !item.isPriority && (
                                 <span className="text-[10px] font-bold text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100 uppercase tracking-wider">
                                     Vòng {item.round}
+                                </span>
+                            )}
+                            {item.status === 'waiting' && (
+                                <span className="text-[10px] font-bold text-amber-600 bg-amber-100 px-2 py-0.5 rounded border border-amber-200 uppercase tracking-wider">
+                                    Chờ Bài
+                                </span>
+                            )}
+                            {item.status === 'skipped' && (
+                                <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 uppercase tracking-wider">
+                                    Đã Bỏ Qua
+                                </span>
+                            )}
+                            {item.wasSkipped && item.status === 'ready' && (
+                                <span className="text-[10px] font-bold text-green-600 bg-green-100 px-2 py-0.5 rounded border border-green-200 uppercase tracking-wider">
+                                    Đã Chọn Bài
                                 </span>
                             )}
                         </div>
@@ -92,7 +116,20 @@ const QueueItem = React.memo(({ item, index, onRemove, onReplace, onPlay, onInvi
                 </div>
 
                 {/* First-item controls */}
-                {isFirst && queueMode === 'manual' && (
+                {isFirst && item.status === 'waiting' && (
+                    <div className="mt-1 pt-2 border-t border-amber-200 flex gap-2">
+                        <Button size="sm" onClick={() => onWaitForSong && onWaitForSong(item)} className="bg-amber-500 hover:bg-amber-600 text-white font-black text-[10px] px-3 py-1.5 uppercase tracking-wider flex-1">
+                            Chờ Chọn Bài
+                        </Button>
+                        <Button size="sm" onClick={() => onChooseForGuest && onChooseForGuest(item)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-black text-[10px] px-3 py-1.5 uppercase tracking-wider flex-1">
+                            Chọn Hộ
+                        </Button>
+                        <Button size="sm" onClick={() => onSkipWaiting && onSkipWaiting(item)} className="bg-slate-500 hover:bg-slate-600 text-white font-black text-[10px] px-3 py-1.5 uppercase tracking-wider flex-1">
+                            Bỏ Qua
+                        </Button>
+                    </div>
+                )}
+                {isFirst && item.status !== 'waiting' && queueMode === 'manual' && (
                     <div className="mt-1 pt-2 border-t border-slate-100 flex gap-2">
                         <Button size="sm" onClick={() => onInvite(item)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-black text-[10px] px-3 py-1.5 uppercase tracking-wider flex-1">
                             Mời Lên Sân Khấu
@@ -102,7 +139,7 @@ const QueueItem = React.memo(({ item, index, onRemove, onReplace, onPlay, onInvi
                         </Button>
                     </div>
                 )}
-                {isFirst && queueMode === 'auto' && (
+                {isFirst && item.status !== 'waiting' && queueMode === 'auto' && (
                     <div className="mt-1 pt-2 border-t border-slate-100 flex justify-end">
                         <Button size="sm" onClick={() => onPlay(item)} className="bg-slate-800 hover:bg-slate-900 text-white font-black text-[10px] px-3 py-1.5 uppercase tracking-wider w-full">
                             Phát Ngay
@@ -114,6 +151,8 @@ const QueueItem = React.memo(({ item, index, onRemove, onReplace, onPlay, onInvi
     );
 }, (prev, next) =>
     prev.item.id === next.item.id &&
+    prev.item.status === next.item.status &&
+    prev.item.wasSkipped === next.item.wasSkipped &&
     prev.index === next.index &&
     prev.isFirst === next.isFirst &&
     prev.hasCurrentSong === next.hasCurrentSong &&
@@ -123,7 +162,7 @@ const QueueItem = React.memo(({ item, index, onRemove, onReplace, onPlay, onInvi
     prev.itemHeight === next.itemHeight
 );
 
-const QueueList = ({ onReAnnounce }) => {
+const QueueList = ({ onReAnnounce, onWaitForSong, onChooseForGuest, onSkipWaiting, onAddGuest, onChangeBeat }) => {
     const queue = useAppStore((s) => s.queue);
     const removeFromQueue = useAppStore((s) => s.removeFromQueue);
     const currentSong = useAppStore((s) => s.currentSong);
@@ -353,13 +392,50 @@ const QueueList = ({ onReAnnounce }) => {
                         ref={nowPlayingRef}
                         className={`mb-6 relative rounded-2xl border-2 border-dashed transition-colors duration-200 ${dragState?.overNP ? 'border-indigo-400 bg-indigo-50/50 p-1.5' : 'border-transparent p-1.5'}`}
                     >
-                            <div className="flex items-center gap-2 mb-2 px-1">
-                                <span className={`inline-flex rounded-full h-3 w-3 ${isPlaying ? 'bg-indigo-500' : 'bg-orange-500'}`}></span>
-                                <h2 className={`text-xs font-black uppercase tracking-widest ${isPlaying ? 'text-indigo-500' : 'text-orange-500'}`}>
-                                    {dragState?.overNP ? 'Thả để thay thế' : waitingForGuest ? 'Đang Chờ Khách...' : isPlaying ? 'Đang Phát' : 'Sẵn Sàng'}
-                                </h2>
-                            </div>
+                        <div className="flex items-center gap-2 mb-2 px-1">
+                            <span className={`inline-flex rounded-full h-3 w-3 ${currentSong.status === 'waiting' ? 'bg-amber-500' : isPlaying ? 'bg-indigo-500' : 'bg-orange-500'}`}></span>
+                            <h2 className={`text-xs font-black uppercase tracking-widest ${currentSong.status === 'waiting' ? 'text-amber-500' : isPlaying ? 'text-indigo-500' : 'text-orange-500'}`}>
+                                {currentSong.status === 'waiting' ? '⏳ Chờ Chọn Bài' : dragState?.overNP ? 'Thả để thay thế' : waitingForGuest ? 'Đang Chờ Khách...' : isPlaying ? 'Đang Phát' : 'Sẵn Sàng'}
+                            </h2>
+                        </div>
 
+                        {currentSong.status === 'waiting' ? (
+                            /* WAITING SLOT — special Now Playing card */
+                            <Card className="p-3 border-2 border-amber-300 relative rounded-xl shadow-sm overflow-hidden bg-amber-50">
+                                <div className="flex items-center gap-3 relative z-10">
+                                    <div className="w-10 h-10 bg-amber-200 rounded-lg flex items-center justify-center flex-shrink-0 border border-amber-300">
+                                        <span className="text-xl">⏳</span>
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <h3 className="font-black text-amber-800 text-sm leading-normal truncate mb-0.5">{currentSong.addedBy || 'Khách'} - Chờ chọn bài</h3>
+                                        <span className="text-[10px] font-bold text-amber-600 bg-amber-100 px-2 py-0.5 rounded border border-amber-200 uppercase tracking-wider">
+                                            Chờ Bài
+                                        </span>
+                                    </div>
+                                </div>
+                                <div className="mt-2 pt-2 border-t border-amber-200 flex gap-2 relative z-10">
+                                    <button
+                                        onClick={() => onWaitForSong && onWaitForSong(currentSong)}
+                                        className="flex-1 bg-amber-500 hover:bg-amber-600 text-white font-black text-[10px] px-3 py-1.5 uppercase tracking-wider rounded-lg transition-all cursor-pointer active:scale-95"
+                                    >
+                                        🎤 Mời Chọn Bài
+                                    </button>
+                                    <button
+                                        onClick={() => onChooseForGuest && onChooseForGuest(currentSong)}
+                                        className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-[10px] px-3 py-1.5 uppercase tracking-wider rounded-lg transition-all cursor-pointer active:scale-95"
+                                    >
+                                        Chọn Hộ
+                                    </button>
+                                    <button
+                                        onClick={() => onSkipWaiting && onSkipWaiting(currentSong)}
+                                        className="flex-1 bg-slate-500 hover:bg-slate-600 text-white font-black text-[10px] px-3 py-1.5 uppercase tracking-wider rounded-lg transition-all cursor-pointer active:scale-95"
+                                    >
+                                        Bỏ Qua
+                                    </button>
+                                </div>
+                            </Card>
+                        ) : (
+                            /* NORMAL Now Playing card */
                             <Card className={`p-3 border-0 relative rounded-xl text-white shadow-sm overflow-hidden ${isPlaying ? 'bg-indigo-600' : 'bg-slate-800'}`}>
                                 {/* Background Decorations */}
                                 <div className="absolute top-0 right-0 w-20 h-20 bg-white/10 rounded-full -mr-10 -mt-10"></div>
@@ -397,6 +473,16 @@ const QueueList = ({ onReAnnounce }) => {
                                     </div>
                                 </div>
 
+                                {onChangeBeat && (
+                                    <div className="mt-2 pt-2 border-t border-white/20 flex gap-2 relative z-10">
+                                        <button
+                                            onClick={onChangeBeat}
+                                            className="flex-1 bg-white/20 hover:bg-white/30 text-white font-black text-[10px] px-3 py-1.5 uppercase tracking-wider rounded-lg transition-all cursor-pointer active:scale-95 flex items-center justify-center gap-1"
+                                        >
+                                            <Disc3 size={12} /> Đổi Beat
+                                        </button>
+                                    </div>
+                                )}
                                 {queueMode === 'manual' && !isPlaying && (
                                     <div className="mt-2 pt-2 border-t border-white/20 flex gap-2 relative z-10">
                                         {!isPlaying && (
@@ -416,6 +502,7 @@ const QueueList = ({ onReAnnounce }) => {
                                     </div>
                                 )}
                             </Card>
+                        )}
                     </div>
                 ) : null}
 
@@ -425,6 +512,15 @@ const QueueList = ({ onReAnnounce }) => {
                         <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest">Hàng Chờ</h2>
                         <div className="flex items-center gap-2">
                             <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{queue.length}</span>
+                            {onAddGuest && (
+                                <button
+                                    onClick={onAddGuest}
+                                    className="text-[10px] font-black text-white bg-amber-500 hover:bg-amber-600 px-2 py-0.5 rounded-full cursor-pointer active:scale-95 transition-all"
+                                    title="Thêm khách giữ chỗ"
+                                >
+                                    + Khách
+                                </button>
+                            )}
                             {queue.length > 0 && (
                                 <button
                                     onClick={() => setShowClearModal(true)}
@@ -454,6 +550,9 @@ const QueueList = ({ onReAnnounce }) => {
                                 onReplace={handleReplace}
                                 onPlay={handlePlay}
                                 onInvite={handleInvite}
+                                onWaitForSong={onWaitForSong}
+                                onChooseForGuest={onChooseForGuest}
+                                onSkipWaiting={onSkipWaiting}
                                 isFirst={!currentSong && index === 0}
                                 hasCurrentSong={!!currentSong}
                                 queueMode={queueMode}

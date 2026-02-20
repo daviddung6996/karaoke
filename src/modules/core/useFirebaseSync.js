@@ -36,7 +36,9 @@ export function useFirebaseSync(isRefresh) {
                 source: item.source || 'web',
                 customerId: item.customerId,
                 round: item.round,
-                isPriority: item.isPriority
+                isPriority: item.isPriority,
+                status: item.status || (item.videoId ? 'ready' : 'waiting'),
+                wasSkipped: item.wasSkipped || false,
             }));
 
             // If user has manually reordered, preserve their arrangement

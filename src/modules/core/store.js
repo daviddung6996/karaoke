@@ -4,15 +4,11 @@ export const useAppStore = create((set) => ({
     // Queue State
     queue: [],
     addToQueue: (item) => set((state) => {
-        if (!item || !item.videoId || !item.title) {
-            return state;
-        }
+        if (!item) return state;
         return { queue: [...state.queue, item] };
     }),
     insertToQueue: (item, index) => set((state) => {
-        if (!item || !item.videoId || !item.title) {
-            return state;
-        }
+        if (!item) return state;
         const newQueue = [...state.queue];
         if (index < 0) index = 0;
         if (index > newQueue.length) index = newQueue.length;
@@ -62,6 +58,10 @@ export const useAppStore = create((set) => ({
     isMuted: false,
     setVolume: (vol) => set({ volume: vol }),
     setIsMuted: (val) => set({ isMuted: val }),
+
+    // Beat Change (TV overlay shows host search results)
+    beatSearchResults: [],
+    setBeatSearchResults: (results) => set({ beatSearchResults: results }),
 
     // Projection State
     isProjectionOpen: false,

@@ -23,8 +23,9 @@ import { cleanYoutubeTitle } from './utils/titleUtils';
 import { useTVWindow } from './modules/core/useTVWindow';
 import { useFirebaseSync } from './modules/core/useFirebaseSync';
 import { useSessionRestore, saveCurrentSongToSession, saveQueueToSession } from './modules/core/useSessionRestore';
-import { setNowPlaying, clearNowPlaying, completeSong, updateNowPlayingProgress } from './services/firebaseQueueService';
+import { setNowPlaying, clearNowPlaying, completeSong, updateNowPlayingProgress, pushReservationToFirebase, guestNameToCustomerKey, updateSlotWithSong, updateSlotStatus, startBeatChange, confirmBeatChange, cancelBeatChange } from './services/firebaseQueueService';
 import { getPlayerTime, getDuration } from './modules/player/playerRegistry';
+import GuestNameModal from './modules/search/GuestNameModal';
 
 const ControlPanel = () => {
 
@@ -81,11 +82,45 @@ const ControlPanel = () => {
   const handleNext = () => {
     if (queue.length > 0) {
       const nextSong = queue[0];
+      // Skip over 'skipped' items to find next playable song
+      if (nextSong.status === 'skipped') {
+        removeFromQueue(nextSong.id);
+        // Try the next one in queue after removing
+        const remaining = useAppStore.getState().queue;
+        if (remaining.length > 0) {
+          const afterSkip = remaining[0];
+          setCurrentSong(afterSkip);
+          removeFromQueue(afterSkip.id);
+        } else {
+          setIsPlaying(false);
+          setCurrentSong(null);
+        }
+        return;
+      }
+      // Waiting slot: DON'T auto-play, stage it + auto TTS invite
+      if (nextSong.status === 'waiting') {
+        setCurrentSong({ ...nextSong, isStaged: true });
+        removeFromQueue(nextSong.id);
+        setIsPlaying(false);
+        const name = nextSong.addedBy || 'quý khách';
+        const inviteTemplates = [
+          `Xin mời ${name} lên chọn cho mình một bài hát nhé`,
+          `Đến lượt ${name} rồi ạ, kính mời lên chọn bài hát nhé`,
+          `Xin mời ${name} chọn cho mình một ca khúc yêu thích ạ`,
+          `Kính mời ${name} lên sân khấu chọn bài hát nhé ạ`,
+          `${name} ơi, đến lượt rồi ạ, mời lên chọn bài nhé`,
+          `Xin nhường sân khấu cho ${name}, mời chọn một bài hát hay nhé ạ`,
+          `Mời ${name} lên chọn cho mình một bài hát thật hay nhé ạ`,
+          `${name} ơi, sân khấu đang chờ đón, xin mời lên chọn bài nhé`,
+        ];
+        announce(inviteTemplates[Math.floor(Math.random() * inviteTemplates.length)]);
+        return;
+      }
       setCurrentSong(nextSong);
       removeFromQueue(nextSong.id);
     } else {
       setIsPlaying(false);
-      setCurrentSong(null); // Clear current song to indicate "Idle" state
+      setCurrentSong(null);
     }
   };
 
@@ -98,7 +133,7 @@ const ControlPanel = () => {
   const hasPlayedFirstSongRef = React.useRef(false);
 
   // Sync state to TV window & Firebase queue
-  usePlayerSync('host', { onSongEnded: handleSongEnd });
+  const { sendMessage } = usePlayerSync('host', { onSongEnded: handleSongEnd });
   useFirebaseSync(isRefresh);
 
   // Auto-play: block until session restore is done on F5
@@ -121,14 +156,16 @@ const ControlPanel = () => {
   React.useEffect(() => {
     if (!restoreComplete) return;
     if (!currentSong && queue.length > 0 && queueMode === 'auto') {
+      const nextSong = queue[0];
+      // Don't auto-pick waiting/skipped items — host decides
+      if (nextSong.status === 'waiting' || nextSong.status === 'skipped') return;
+
       if (!hasPlayedFirstSongRef.current) {
         // First song of session: stage it — no TTS, no mic detection, wait for manual "Phát"
-        const nextSong = { ...queue[0], isStaged: true };
-        setCurrentSong(nextSong);
+        setCurrentSong({ ...nextSong, isStaged: true });
         removeFromQueue(nextSong.id);
       } else {
         // Subsequent songs: normal auto-play flow (TTS + mic detection)
-        const nextSong = queue[0];
         setCurrentSong(nextSong);
         removeFromQueue(nextSong.id);
       }
@@ -170,7 +207,8 @@ const ControlPanel = () => {
       saveCurrentSongToSession(currentSong);
       setNowPlaying(currentSong).catch(() => { });
       // Song is now playing → complete it (remove from queue + advance startRound for fairness)
-      if (currentSong.firebaseKey) {
+      // BUT: don't complete waiting slots — they haven't chosen a song yet
+      if (currentSong.firebaseKey && currentSong.status !== 'waiting') {
         completeSong(currentSong.firebaseKey).catch(() => { });
       }
     } else {
@@ -193,6 +231,41 @@ const ControlPanel = () => {
     if (d > 0) updateNowPlayingProgress(t, d).catch(() => { });
     return () => clearInterval(interval);
   }, [currentSong, isPlaying]);
+
+  // TTS reminder: when ~30s left and next person hasn't chosen a song
+  const reminderSentRef = React.useRef(null);
+  React.useEffect(() => {
+    if (!currentSong || !isPlaying) return;
+    // Reset reminder when song changes
+    if (reminderSentRef.current !== currentSong.id) {
+      reminderSentRef.current = null;
+    }
+
+    const checkReminder = () => {
+      if (reminderSentRef.current === currentSong.id) return;
+      const dur = getDuration();
+      const time = getPlayerTime();
+      if (dur <= 0 || time <= 0) return;
+      const remaining = dur - time;
+      if (remaining > 35 || remaining < 25) return;
+
+      const state = useAppStore.getState();
+      const next = state.queue[0];
+      if (next && next.status === 'waiting') {
+        reminderSentRef.current = currentSong.id;
+        const name = next.addedBy || 'quý khách';
+        const templates = [
+          `${name} ơi, sắp tới lượt rồi ạ, mời chọn bài hát nhé`,
+          `Xin nhắc ${name}, sắp tới lượt, mời chọn bài nhé ạ`,
+          `${name} ơi, chuẩn bị lên sân khấu, mời chọn bài ạ`,
+        ];
+        announce(templates[Math.floor(Math.random() * templates.length)]);
+      }
+    };
+
+    const interval = setInterval(checkReminder, 5000);
+    return () => clearInterval(interval);
+  }, [currentSong?.id, isPlaying, announce]);
 
   const handlePlayPause = () => {
     // If the current song is staged (waiting for manual start after a delete),
@@ -283,6 +356,7 @@ const ControlPanel = () => {
   React.useEffect(() => {
     if (!currentSong) return;
     if (currentSong.isStaged) return; // Skip if staged (waiting for manual start)
+    if (currentSong.status === 'waiting') return; // No TTS for waiting slots
     // Skip TTS entirely for replaced songs — they play instantly
     if (currentSong.isReplaced) {
       setAnnouncedSongId(currentSong.id);
@@ -398,6 +472,158 @@ const ControlPanel = () => {
     }
   }, [currentSong, performAnnouncement]);
 
+  // ─── Waiting Slot Handlers ───
+  const [showAddGuestModal, setShowAddGuestModal] = React.useState(false);
+  const [choosingForItem, setChoosingForItem] = React.useState(null);
+  const [changingBeatMode, setChangingBeatMode] = React.useState(false);
+
+  const handleAddGuest = () => setShowAddGuestModal(true);
+
+  const handleAddGuestConfirm = async (guestName) => {
+    try {
+      const customerKey = guestNameToCustomerKey(guestName);
+      await pushReservationToFirebase(guestName, customerKey);
+    } catch (err) {
+      console.error('[AddGuest] Failed:', err);
+    }
+    setShowAddGuestModal(false);
+  };
+
+  const handleWaitForSong = React.useCallback((item) => {
+    const name = item.addedBy || 'quý khách';
+    const waitTemplates = [
+      `${name} ơi sắp tới lượt rồi ạ, mời chọn bài hát nhé`,
+      `Xin thông báo ${name} sắp tới lượt, mời chọn bài hát ạ`,
+      `${name} ơi, chuẩn bị lên sân khấu, mời chọn bài ạ`,
+      `Sắp đến lượt ${name} rồi ạ, xin mời chọn bài hát nhé`,
+      `${name} ơi, mời ${name} lên sân khấu chọn bài hát nhé`,
+      `Xin mời ${name} chuẩn bị, sắp tới lượt rồi ạ, chọn bài nhé`,
+      `${name} ơi, sắp được lên sân khấu rồi ạ, mời ${name} lên chọn bài nhé`,
+      `Xin mời ${name} chọn bài hát, sắp tới lượt rồi ạ`,
+    ];
+    announce(waitTemplates[Math.floor(Math.random() * waitTemplates.length)]);
+  }, [announce]);
+
+  const handleChooseForGuest = React.useCallback((item) => {
+    setChoosingForItem(item);
+    setActivePanel('right');
+  }, []);
+
+  const handleSkipWaiting = React.useCallback(async (item) => {
+    await updateSlotStatus(item.firebaseKey || item.id, 'skipped');
+    // If this item is currently staged as currentSong, clear it and move on
+    const state = useAppStore.getState();
+    if (state.currentSong && state.currentSong.id === item.id) {
+      setIsPlaying(false);
+      setAnnouncedSongId(null);
+      if (micAbortRef.current) micAbortRef.current.abort();
+      // Try next song in queue
+      const q = state.queue;
+      if (q.length > 0) {
+        const next = q[0];
+        if (next.status === 'waiting' || next.status === 'skipped') {
+          setCurrentSong(null);
+        } else {
+          setCurrentSong({ ...next, isStaged: true });
+          removeFromQueue(next.id);
+        }
+      } else {
+        setCurrentSong(null);
+      }
+    }
+  }, [setIsPlaying, setCurrentSong, removeFromQueue]);
+
+  // Handle song selection when choosing for a guest's waiting slot
+  const handleChooseForGuestConfirm = React.useCallback(async (track) => {
+    if (!choosingForItem) return;
+    const displayTitle = track.cleanTitle || cleanYoutubeTitle(track.title);
+    const slotId = choosingForItem.firebaseKey || choosingForItem.id;
+
+    await updateSlotWithSong(slotId, {
+      videoId: track.videoId,
+      title: track.title,
+      cleanTitle: displayTitle,
+      artist: track.artist,
+      thumbnail: track.thumbnail,
+    });
+
+    // If this waiting slot is currently staged as currentSong, update it and play
+    const state = useAppStore.getState();
+    if (state.currentSong && state.currentSong.id === choosingForItem.id) {
+      setCurrentSong({
+        ...state.currentSong,
+        videoId: track.videoId,
+        title: track.title,
+        cleanTitle: displayTitle,
+        artist: track.artist,
+        thumbnail: track.thumbnail,
+        status: 'ready',
+        isStaged: false,
+      });
+    }
+
+    setChoosingForItem(null);
+  }, [choosingForItem, setCurrentSong]);
+
+  // ─── Beat Change Handlers ───
+  // "Đổi beat" = open search panel so host can search for a different video
+  const handleChangeBeat = React.useCallback(() => {
+    if (!currentSong) return;
+    // Pause playback first — host will manually press Play after selecting new beat
+    setIsPlaying(false);
+    setChangingBeatMode(true);
+    setActivePanel('right');
+    // Set changingBeat locally so usePlayerSync sends BEAT_CHANGE to TV
+    setCurrentSong({ ...currentSong, changingBeat: true });
+    // Also signal Firebase for customer-web
+    startBeatChange(currentSong.beatOptions || []).catch(() => { });
+  }, [currentSong, setCurrentSong, setIsPlaying]);
+
+  // When host selects a new track from search while in beat-change mode
+  const handleBeatChangeConfirm = React.useCallback(async (track) => {
+    if (!currentSong) return;
+    const displayTitle = track.cleanTitle || cleanYoutubeTitle(track.title);
+    // Update Firebase nowPlaying with new video
+    await confirmBeatChange({ videoId: track.videoId, title: track.title }).catch(() => { });
+    // Update local store — change videoId to trigger TV reload
+    setCurrentSong({
+      ...currentSong,
+      videoId: track.videoId,
+      title: track.title,
+      cleanTitle: displayTitle,
+      artist: track.artist,
+      thumbnail: track.thumbnail,
+      changingBeat: false,
+    });
+    setIsPlaying(false); // Don't auto-play — host must manually press Play
+    setChangingBeatMode(false);
+    // Clear TV search results
+    sendMessage('BEAT_SEARCH_RESULTS', { results: [], isSearching: false });
+  }, [currentSong, setCurrentSong, setIsPlaying, sendMessage]);
+
+  const handleCancelBeatChange = React.useCallback(() => {
+    setChangingBeatMode(false);
+    if (currentSong) setCurrentSong({ ...currentSong, changingBeat: false });
+    cancelBeatChange().catch(() => { });
+    // Clear TV search results
+    sendMessage('BEAT_SEARCH_RESULTS', []);
+  }, [currentSong, setCurrentSong, sendMessage]);
+
+  // Forward search results to TV when in beat-change mode
+  const handleBeatSearchResults = React.useCallback((results, isSearching) => {
+    if (!changingBeatMode) return;
+    // Send top 6 results to TV for display (increased size for guests)
+    const tvResults = (results || []).slice(0, 6).map(r => ({
+      videoId: r.videoId,
+      title: r.title,
+      cleanTitle: r.cleanTitle,
+      artist: r.artist,
+      thumbnail: r.thumbnail,
+      duration: r.duration,
+    }));
+    sendMessage('BEAT_SEARCH_RESULTS', { results: tvResults, isSearching });
+  }, [changingBeatMode, sendMessage]);
+
   // Global Keyboard Shortcuts
   React.useEffect(() => {
     const handleKeyDown = (e) => {
@@ -460,7 +686,14 @@ const ControlPanel = () => {
             </div>
           </div>
           <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
-            <QueueList onReAnnounce={handleReAnnounce} />
+            <QueueList
+              onReAnnounce={handleReAnnounce}
+              onWaitForSong={handleWaitForSong}
+              onChooseForGuest={handleChooseForGuest}
+              onSkipWaiting={handleSkipWaiting}
+              onAddGuest={handleAddGuest}
+              onChangeBeat={handleChangeBeat}
+            />
           </div>
         </Card>
       </div>
@@ -552,16 +785,49 @@ const ControlPanel = () => {
           <div className="p-3 border-b border-slate-100 bg-slate-50 flex items-center gap-2">
             <Search size={18} className="text-slate-800" />
             <h2 className="text-lg font-black text-slate-800 uppercase tracking-tighter">Tìm Kiếm</h2>
+            {choosingForItem && (
+              <span className="ml-auto text-[10px] font-black text-amber-600 bg-amber-100 px-2 py-1 rounded-full border border-amber-200 uppercase tracking-wider">
+                Chọn cho: {choosingForItem.addedBy}
+              </span>
+            )}
+            {changingBeatMode && (
+              <span className="ml-auto text-[10px] font-black text-indigo-600 bg-indigo-100 px-2 py-1 rounded-full border border-indigo-200 uppercase tracking-wider">
+                Đổi Beat
+              </span>
+            )}
           </div>
 
+          {choosingForItem && (
+            <div className="p-2 bg-amber-50 border-b border-amber-200 flex items-center justify-between">
+              <span className="text-xs font-bold text-amber-700">🎵 Đang chọn bài cho {choosingForItem.addedBy}</span>
+              <button onClick={() => setChoosingForItem(null)} className="text-[10px] font-bold text-amber-600 hover:text-amber-800 cursor-pointer">Hủy</button>
+            </div>
+          )}
+
+          {changingBeatMode && (
+            <div className="p-2 bg-indigo-50 border-b border-indigo-200 flex items-center justify-between">
+              <span className="text-xs font-bold text-indigo-700">🎵 Tìm beat mới cho: {currentSong?.addedBy || 'Khách'}</span>
+              <button onClick={handleCancelBeatChange} className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer">Hủy</button>
+            </div>
+          )}
+
           <div className="flex-1 overflow-hidden relative">
-            <SearchBar isExpanded={activePanel === 'right'} />
+            <SearchBar isExpanded={activePanel === 'right'} choosingForItem={choosingForItem || (changingBeatMode ? currentSong : null)} onChooseForGuest={changingBeatMode ? handleBeatChangeConfirm : handleChooseForGuestConfirm} onSearchResults={changingBeatMode ? handleBeatSearchResults : null} />
           </div>
         </Card>
       </div>
 
       <HistoryModal />
       <MicSettingsModal />
+
+      {/* Add Guest (Reserve Slot) Modal */}
+      <GuestNameModal
+        isOpen={showAddGuestModal}
+        onClose={() => setShowAddGuestModal(false)}
+        onConfirm={(name) => handleAddGuestConfirm(name)}
+        songTitle="Giữ chỗ - Chọn bài sau"
+      />
+
     </div>
   );
 };

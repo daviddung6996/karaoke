@@ -8,6 +8,7 @@ const MarqueeOverlay = React.memo(() => {
     const nextVideoId = useAppStore((s) => s.queue[0]?.videoId ?? null);
     const nextTitle = useAppStore((s) => s.queue[0]?.cleanTitle || s.queue[0]?.title || null);
     const nextAddedBy = useAppStore((s) => s.queue[0]?.addedBy ?? null);
+    const nextStatus = useAppStore((s) => s.queue[0]?.status ?? null);
     const [isVisible, setIsVisible] = useState(false);
 
     useEffect(() => {
@@ -85,7 +86,12 @@ const MarqueeOverlay = React.memo(() => {
                     </div>
                     <div className="min-w-0 flex flex-col justify-center flex-1">
                         <div className="text-indigo-300 text-sm font-bold uppercase tracking-widest leading-none mb-2">TIẾP THEO</div>
-                        {nextVideoId ? (
+                        {nextStatus === 'waiting' ? (
+                            <>
+                                <div className="text-amber-400 font-bold text-3xl uppercase line-clamp-2 w-full leading-tight break-words">⏳ Chờ chọn bài</div>
+                                <div className="text-white text-2xl font-bold uppercase tracking-wide mt-1 truncate">{nextAddedBy || 'Khách'}</div>
+                            </>
+                        ) : nextVideoId ? (
                             <>
                                 <div className="text-white/90 font-bold text-3xl uppercase line-clamp-2 w-full leading-tight break-words">{nextTitle}</div>
                                 <div className="text-white text-2xl font-bold uppercase tracking-wide mt-1 truncate">{nextAddedBy || 'Khách'}</div>

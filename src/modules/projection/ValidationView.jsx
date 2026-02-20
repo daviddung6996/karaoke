@@ -3,6 +3,7 @@ import { useAppStore } from '../core/store';
 import YouTubePlayer from '../player/YouTubePlayer';
 import WaitingOverlay from '../player/WaitingOverlay';
 import MarqueeOverlay from './MarqueeOverlay';
+import BeatChangeOverlay from './BeatChangeOverlay';
 import { usePlayerSync } from '../player/usePlayerSync';
 import { Maximize, Minimize } from 'lucide-react';
 
@@ -216,8 +217,8 @@ const ValidationView = () => {
             <Watchdog />
 
             {/* Player Container - Always mounted to prevent fullscreen exit */}
-            <div className={`w-full h-full relative z-10 transition-opacity duration-500 ${currentSong && isPlaying ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-                {currentSong ? (
+            <div className={`w-full h-full relative z-10 transition-opacity duration-500 ${currentSong && currentSong.videoId && (isPlaying || currentSong.changingBeat) ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                {currentSong && currentSong.videoId ? (
                     <div className="w-full h-full relative">
                         <PlayerErrorBoundary videoId={currentSong.videoId}>
                             <YouTubePlayer
@@ -232,6 +233,7 @@ const ValidationView = () => {
                         {/* Block clicks */}
                         <div className="absolute inset-0 z-10" />
                         <MarqueeOverlay />
+                        <BeatChangeOverlay />
                     </div>
                 ) : <div className="w-full h-full" />}
             </div>
@@ -249,6 +251,35 @@ const ValidationView = () => {
                     />
                 )}
             </div>
+            {/* Waiting Slot Overlay — invite guest to choose song */}
+            {currentSong && currentSong.status === 'waiting' && !isPlaying && (
+                <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
+                    <div className="relative px-20 py-14 text-center max-w-[85vw]">
+                        {/* Solid dark card */}
+                        <div className="absolute inset-0 bg-black rounded-[2rem] border-2 border-indigo-400 shadow-[0_0_80px_rgba(99,102,241,0.3)]" />
+
+                        {/* Content */}
+                        <div className="relative z-10">
+                            {/* Top accent line */}
+                            <div className="mx-auto w-24 h-1 bg-indigo-500 rounded-full mb-8" />
+
+                            <p className="text-indigo-300 font-bold text-2xl uppercase tracking-[0.3em] mb-4">Xin mời</p>
+
+                            <h2 className="text-white font-black text-7xl uppercase tracking-tight mb-6 drop-shadow-lg">
+                                {currentSong.addedBy || 'Quý Khách'}
+                            </h2>
+
+                            <p className="text-indigo-400 font-extrabold text-4xl uppercase tracking-widest">
+                                Lên chọn bài hát
+                            </p>
+
+                            {/* Bottom accent line */}
+                            <div className="mx-auto w-24 h-1 bg-indigo-500 rounded-full mt-8" />
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <WaitingOverlay onPauseToggle={() => {
                 const store = useAppStore.getState();
                 store.setCountdownPaused(!store.countdownPaused);

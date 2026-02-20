@@ -92,7 +92,7 @@ export async function pushToFirebaseQueue(song, customerKey) {
     const newSongRef = push(songsRef);
     const newSongKey = newSongRef.key;
 
-    await set(newSongRef, {
+    const songData = {
         id: newSongKey,
         videoId: song.videoId,
         title: song.title,
@@ -103,10 +103,126 @@ export async function pushToFirebaseQueue(song, customerKey) {
         addedAt: now,
         isPriority: song.isPriority || false,
         source: song.source || 'web',
+    };
+    if (song.beatOptions) songData.beatOptions = song.beatOptions;
+    await set(newSongRef, songData);
+
+    await syncPlayQueue();
+    return { key: newSongKey };
+}
+
+/**
+ * Reserve a slot in the queue without selecting a song.
+ * Creates a queue item with status: 'waiting'.
+ */
+export async function pushReservationToFirebase(guestName, customerKey) {
+    if (!firebaseReady || !database) return Promise.resolve();
+
+    const effectiveKey = customerKey || getDeviceId();
+    const customerRef = ref(database, `customerQueues/${effectiveKey}`);
+    const snapshot = await get(customerRef);
+    const customerData = snapshot.val();
+    const now = Date.now();
+
+    const allSnapshot = await get(getCustomerQueuesRef());
+    const allQueues = allSnapshot.val() || {};
+    const nextRound = globalNextRound(allQueues);
+
+    if (!customerData) {
+        await update(customerRef, {
+            name: guestName || 'Khách mới',
+            firstOrderTime: now,
+            startRound: nextRound,
+        });
+    } else {
+        const songs = customerData.songs ? Object.values(customerData.songs) : [];
+        const hasNormalSongs = songs.some(s => !s.isPriority);
+        if (!hasNormalSongs) {
+            const bumped = Math.max(customerData.startRound || 1, nextRound);
+            await update(customerRef, { startRound: bumped, name: guestName });
+        } else {
+            await update(customerRef, { name: guestName });
+        }
+    }
+
+    const songsRef = ref(database, `customerQueues/${effectiveKey}/songs`);
+    const newSongRef = push(songsRef);
+    const newSongKey = newSongRef.key;
+
+    await set(newSongRef, {
+        id: newSongKey,
+        videoId: null,
+        title: null,
+        cleanTitle: null,
+        artist: null,
+        addedBy: guestName,
+        thumbnail: null,
+        addedAt: now,
+        isPriority: false,
+        source: 'host',
+        status: 'waiting',
     });
 
     await syncPlayQueue();
     return { key: newSongKey };
+}
+
+/**
+ * Update a waiting slot with a song selection.
+ * Changes status from 'waiting' to 'ready'.
+ */
+export async function updateSlotWithSong(songId, songData) {
+    if (!firebaseReady || !database || !songId) return;
+
+    try {
+        const snapshot = await get(getCustomerQueuesRef());
+        const customers = snapshot.val();
+        if (!customers) return;
+
+        for (const [custId, data] of Object.entries(customers)) {
+            if (data.songs && data.songs[songId]) {
+                const songRef = ref(database, `customerQueues/${custId}/songs/${songId}`);
+                await update(songRef, {
+                    videoId: songData.videoId,
+                    title: songData.title,
+                    cleanTitle: songData.cleanTitle || songData.title,
+                    artist: songData.artist || '',
+                    thumbnail: songData.thumbnail || '',
+                    status: 'ready',
+                });
+                await syncPlayQueue();
+                return;
+            }
+        }
+    } catch (e) {
+        console.error('Error updating slot with song:', e);
+    }
+}
+
+/**
+ * Update the status of a queue item.
+ */
+export async function updateSlotStatus(songId, status) {
+    if (!firebaseReady || !database || !songId) return;
+
+    try {
+        const snapshot = await get(getCustomerQueuesRef());
+        const customers = snapshot.val();
+        if (!customers) return;
+
+        for (const [custId, data] of Object.entries(customers)) {
+            if (data.songs && data.songs[songId]) {
+                const songRef = ref(database, `customerQueues/${custId}/songs/${songId}`);
+                const updateData = { status };
+                if (status === 'skipped') updateData.wasSkipped = true;
+                await update(songRef, updateData);
+                await syncPlayQueue();
+                return;
+            }
+        }
+    } catch (e) {
+        console.error('Error updating slot status:', e);
+    }
 }
 
 // Track in-flight removals to prevent duplicate calls
@@ -193,6 +309,47 @@ export function clearFirebaseQueue() {
     updates['customerQueues'] = null;
     updates['playQueue'] = null;
     return update(ref(database), updates);
+}
+
+// --- BEAT CHANGE ---
+
+/**
+ * Start beat change process for the currently playing song.
+ * Sets changingBeat: true and stores beatOptions on nowPlaying.
+ */
+export async function startBeatChange(beatOptions) {
+    if (!firebaseReady || !database) return;
+    const npRef = ref(database, 'nowPlaying');
+    await update(npRef, {
+        changingBeat: true,
+        beatOptions: beatOptions || [],
+    });
+}
+
+/**
+ * Confirm a new beat selection. Updates videoId and clears changingBeat.
+ */
+export async function confirmBeatChange(newBeat) {
+    if (!firebaseReady || !database || !newBeat) return;
+    const npRef = ref(database, 'nowPlaying');
+    await update(npRef, {
+        videoId: newBeat.videoId,
+        title: newBeat.title,
+        changingBeat: false,
+        beatOptions: null,
+    });
+}
+
+/**
+ * Cancel beat change without changing the current beat.
+ */
+export async function cancelBeatChange() {
+    if (!firebaseReady || !database) return;
+    const npRef = ref(database, 'nowPlaying');
+    await update(npRef, {
+        changingBeat: false,
+        beatOptions: null,
+    });
 }
 
 // --- NOW PLAYING (Unchanged mostly) ---

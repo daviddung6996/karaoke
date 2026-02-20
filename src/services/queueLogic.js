@@ -59,6 +59,7 @@ export function generatePlayQueue(customerQueues) {
                 customerName: data.name,
                 isPriority: true,
                 firebaseKey: s.id || s.firebaseKey,
+                status: s.status || (s.videoId ? 'ready' : 'waiting'),
             });
         }
 
@@ -101,6 +102,7 @@ export function generatePlayQueue(customerQueues) {
                     round,
                     originalSongIndex: songIndex,
                     firebaseKey: song.id || song.firebaseKey || `${customer.id}_${songIndex}`,
+                    status: song.status || (song.videoId ? 'ready' : 'waiting'),
                 });
             }
         }

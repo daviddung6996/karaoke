@@ -6,6 +6,7 @@ import { searchVideos } from '../core/videoSearch';
 import { useSuggestions } from './useSuggestions';
 import SuggestDropdown from './SuggestDropdown';
 import GuestNameModal from './GuestNameModal';
+import BeatSelectionModal from './BeatSelectionModal';
 
 import { cleanYoutubeTitle } from '../../utils/titleUtils';
 
@@ -22,7 +23,7 @@ function extractYoutubeId(text) {
     return null;
 }
 
-const SearchBar = ({ isExpanded = false }) => {
+const SearchBar = ({ isExpanded = false, choosingForItem = null, onChooseForGuest = null, onSearchResults = null }) => {
     const [query, setQuery] = useState('');
     const [results, setResults] = useState([]);
     const [isSearching, setIsSearching] = useState(false);
@@ -32,6 +33,11 @@ const SearchBar = ({ isExpanded = false }) => {
     // Modal State
     const [showModal, setShowModal] = useState(false);
     const [selectedTrack, setSelectedTrack] = useState(null);
+
+    // Beat Selection State
+    const [showBeatModal, setShowBeatModal] = useState(false);
+    const [pendingTrack, setPendingTrack] = useState(null); // Track waiting for beat selection
+    const [selectedBeatOptions, setSelectedBeatOptions] = useState([]); // Saved beat options
 
     // Voice Search State
     const [isListening, setIsListening] = useState(false);
@@ -48,6 +54,22 @@ const SearchBar = ({ isExpanded = false }) => {
 
     const { suggestions, isLoading: isSuggesting } = useSuggestions(query, isFocused);
     const { addToQueue, updateQueueItem, queueMode } = useAppStore();
+
+    // Forward search results to parent (for TV beat-change overlay)
+    useEffect(() => {
+        if (onSearchResults) onSearchResults(results, isSearching);
+    }, [results, isSearching, onSearchResults]);
+
+    // Handle auto-populate for "Changing Beat" or "Choosing for Guest"
+    useEffect(() => {
+        if (choosingForItem) {
+            const songName = choosingForItem.cleanTitle || cleanYoutubeTitle(choosingForItem.title);
+            if (songName) {
+                setQuery(songName);
+                handleSearch(songName);
+            }
+        }
+    }, [choosingForItem]);
 
     // Transcribe audio via Gemini API (proxied through server)
     const transcribeWithGemini = async (audioBlob) => {
@@ -302,10 +324,22 @@ const SearchBar = ({ isExpanded = false }) => {
         }
     };
 
-    // Step 1: User clicks add -> Open Modal
+    // Step 1: User clicks add -> Open Beat Selection (or choose for guest)
     const handleAddClick = (track) => {
         if (!track || !track.title) return;
-        setSelectedTrack(track);
+        if (choosingForItem && onChooseForGuest) {
+            onChooseForGuest(track, choosingForItem.addedBy);
+            return;
+        }
+        setPendingTrack(track);
+        setShowBeatModal(true);
+    };
+
+    // Step 1.5: User confirms beat -> Open Name Modal
+    const handleBeatConfirm = (selectedBeat, beatOptions) => {
+        setShowBeatModal(false);
+        setSelectedTrack(selectedBeat);
+        setSelectedBeatOptions(beatOptions);
         setShowModal(true);
     };
 
@@ -337,7 +371,10 @@ const SearchBar = ({ isExpanded = false }) => {
                 artist: rawArtist,
                 addedBy: guestName,
                 thumbnail: selectedTrack.thumbnail,
-                isPriority: isPriority
+                isPriority: isPriority,
+                beatOptions: selectedBeatOptions.length > 0
+                    ? selectedBeatOptions.map(b => ({ videoId: b.videoId, title: b.title, thumbnail: b.thumbnail, beatLabel: b.beatLabel, viewCount: b.viewCount }))
+                    : null,
             }, customerKey);
             firebaseKey = result?.key; // Get Firebase key
         } catch (err) {
@@ -447,7 +484,7 @@ const SearchBar = ({ isExpanded = false }) => {
                                 className={`p-1 rounded-full transition-all cursor-pointer ${isListening
                                     ? 'text-red-500 bg-red-50 animate-pulse'
                                     : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'
-                                }`}
+                                    }`}
                                 title={isListening ? 'Đang nghe...' : 'Tìm bằng giọng nói'}
                             >
                                 <Mic size={16} strokeWidth={2.5} />
@@ -519,12 +556,18 @@ const SearchBar = ({ isExpanded = false }) => {
                 )}
 
                 <div className={`gap-2 pb-16 ${isExpanded ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 auto-rows-max' : 'flex flex-col'}`}>
-                    {results.map((result) => (
+                    {results.map((result, beatIdx) => (
                         <div
                             key={result.id || result.videoId}
                             className={`flex ${isExpanded ? 'flex-col p-3 gap-3' : 'flex-row items-center p-1.5 gap-2'} bg-white hover:bg-indigo-50 rounded-lg cursor-pointer group transition-all border border-transparent hover:border-indigo-100 active:scale-[0.98] shadow-sm hover:shadow-md h-full`}
                             onClick={() => handleAddClick(result)}
                         >
+                            {/* Beat-change number badge (matches TV numbering) */}
+                            {choosingForItem?.changingBeat && beatIdx < 10 && (
+                                <div className="w-7 h-7 rounded-full bg-indigo-600 text-white flex items-center justify-center text-sm font-black flex-shrink-0 shadow">
+                                    {beatIdx + 1}
+                                </div>
+                            )}
                             {/* Thumbnail */}
                             <div className={`relative ${isExpanded ? 'w-full aspect-video rounded-lg' : 'w-14 h-10 rounded-md'} overflow-hidden bg-slate-200 flex-shrink-0`}>
                                 <img src={result.thumbnail} alt="" className="w-full h-full object-cover" loading="lazy" />
@@ -612,13 +655,12 @@ const SearchBar = ({ isExpanded = false }) => {
                         )}
                         <button
                             onClick={voiceStatus === 'listening' ? stopVoiceSearch : undefined}
-                            className={`relative w-16 h-16 rounded-full flex items-center justify-center shadow-lg transition-all cursor-pointer active:scale-95 ${
-                                voiceStatus === 'processing'
+                            className={`relative w-16 h-16 rounded-full flex items-center justify-center shadow-lg transition-all cursor-pointer active:scale-95 ${voiceStatus === 'processing'
                                     ? 'bg-indigo-500 shadow-indigo-200'
                                     : voiceError
                                         ? 'bg-slate-400 shadow-slate-200'
                                         : 'bg-red-500 hover:bg-red-600 shadow-red-200'
-                            } text-white`}
+                                } text-white`}
                         >
                             {voiceStatus === 'processing'
                                 ? <div className="animate-spin h-6 w-6 border-3 border-white border-t-transparent rounded-full" />
@@ -677,6 +719,14 @@ const SearchBar = ({ isExpanded = false }) => {
                     )}
                 </div>
             )}
+
+            {/* Beat Selection Modal */}
+            <BeatSelectionModal
+                isOpen={showBeatModal}
+                onClose={() => setShowBeatModal(false)}
+                onConfirm={handleBeatConfirm}
+                track={pendingTrack}
+            />
 
             {/* Guest Name Modal */}
             <GuestNameModal

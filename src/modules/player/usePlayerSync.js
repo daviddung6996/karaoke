@@ -156,6 +156,20 @@ export const usePlayerSync = (role = 'host', { onSongEnded } = {}) => {
                     break;
                 }
 
+                case 'BEAT_CHANGE': {
+                    // Update changingBeat flag on TV's currentSong without resetting playback
+                    const cur = useAppStore.getState().currentSong;
+                    if (cur) {
+                        setCurrentSong({ ...cur, changingBeat: payload.changingBeat, beatOptions: payload.beatOptions || cur.beatOptions });
+                    }
+                    break;
+                }
+
+                case 'BEAT_SEARCH_RESULTS':
+                    // Show host's search results on TV overlay
+                    useAppStore.getState().setBeatSearchResults(payload?.results || []);
+                    break;
+
                 case 'SET_VOLUME':
                     // Only allow unmute if we are supposedly playing
                     // This prevents volume adjustments during "Waiting for guest" from unmuting the TV
@@ -306,7 +320,14 @@ export const usePlayerSync = (role = 'host', { onSongEnded } = {}) => {
     useEffect(() => {
         if (role !== 'host') return;
 
-        // If staged, send NULL to TV so it shows idle background
+        // Staged waiting slot: send to TV so it shows "Mời chọn bài" overlay
+        if (currentSong?.isStaged && currentSong?.status === 'waiting') {
+            prevSongIdRef.current = `waiting_${currentSong.id}`;
+            sendMessage('SET_SONG', currentSong);
+            return;
+        }
+
+        // If staged (normal song), send NULL to TV so it shows idle background
         if (currentSong?.isStaged) {
             sendMessage('SET_SONG', null);
             return;
@@ -320,6 +341,16 @@ export const usePlayerSync = (role = 'host', { onSongEnded } = {}) => {
             sendMessage('SET_SONG', currentSong);
         }
     }, [role, currentSong, sendMessage]);
+
+    // Send changingBeat flag to TV
+    const prevChangingBeatRef = useRef(null);
+    useEffect(() => {
+        if (role !== 'host') return;
+        const cb = currentSong?.changingBeat || false;
+        if (cb === prevChangingBeatRef.current) return;
+        prevChangingBeatRef.current = cb;
+        sendMessage('BEAT_CHANGE', { changingBeat: cb, beatOptions: currentSong?.beatOptions });
+    }, [role, currentSong?.changingBeat, sendMessage]);
 
     // Send play/pause — discrete commands
     const prevIsPlayingRef = useRef(null);

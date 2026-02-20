@@ -27,7 +27,9 @@ if (fs.existsSync(nmOut)) fs.rmSync(nmOut, { recursive: true });
 // Copy fresh dist/
 copyDir(path.join(__dirname, 'dist'), distOut);
 
-// server.js is maintained directly in karaoke-portable/ — no copy needed
+// Copy latest server.js from root source
+console.log('📄 Copying latest server.js...');
+fs.copyFileSync(path.join(__dirname, 'server.js'), path.join(OUT, 'server.js'));
 
 // Create minimal package.json for the portable version
 const pkg = {
@@ -44,9 +46,9 @@ fs.writeFileSync(path.join(OUT, 'package.json'), JSON.stringify(pkg, null, 2));
 console.log('📥 Step 3: Installing production dependencies...');
 execSync('npm install --omit=dev', { stdio: 'inherit', cwd: OUT });
 
-// Create start.bat
+// Create improved start.bat with auto-install check
 fs.writeFileSync(path.join(OUT, 'start.bat'),
-  `@echo off\r\ntitle Karaoke Server\r\necho.\r\necho   Starting Karaoke Server...\r\necho   Browser will open at http://localhost:5173\r\necho.\r\ntimeout /t 2 /nobreak >nul\r\nstart http://localhost:5173\r\nnode server.js\r\npause\r\n`
+  `@echo off\r\ntitle Karaoke Server\r\necho.\r\necho   Checking components...\r\nif not exist node_modules (\r\n  echo   [!] Missing dependencies. Installing... (Internet required for first run)\r\n  npm install --omit=dev\r\n)\r\necho.\r\necho   Starting Karaoke Server...\r\necho   Browser will open at http://localhost:5173\r\necho.\r\ntimeout /t 2 /nobreak >nul\r\nstart http://localhost:5173\r\nnode server.js\r\npause\r\n`
 );
 
 // Create start.sh for Linux/Mac
@@ -73,11 +75,14 @@ function copyDir(src, dest) {
 }
 
 function getFolderSize(dir) {
-  let size = 0;
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, entry.name);
-    if (entry.isDirectory()) size += parseFloat(getFolderSize(p));
-    else size += fs.statSync(p).size;
+  let bytes = 0;
+  function walk(d) {
+    for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, entry.name);
+      if (entry.isDirectory()) walk(p);
+      else bytes += fs.statSync(p).size;
+    }
   }
-  return (size / 1024 / 1024).toFixed(1);
+  walk(dir);
+  return (bytes / 1024 / 1024).toFixed(1);
 }
